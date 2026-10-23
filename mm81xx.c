@@ -993,6 +993,7 @@ struct morse_hw_cfg mm81xx_cfg = {
 	.get_secureboot_status = mm81xx_get_secureboot_status,
 	.amsdu.enabled = true,
 	.amsdu.has_1500_byte_limit = false,
+	.ampdu_feedback_enabled = false,
 	.gpios.busy = -ENOENT,
 	.gpios.reset = -ENOENT,
 	.gpios.spi_irq = -ENOENT,

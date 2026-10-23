@@ -445,6 +445,7 @@ struct morse_hw_cfg mm6108_cfg = {
 	.get_secureboot_status = NULL,
 	.amsdu.enabled = true,
 	.amsdu.has_1500_byte_limit = true,
+	.ampdu_feedback_enabled = true,
 	.gpios.busy = -ENOENT,
 	.gpios.reset = -ENOENT,
 	.gpios.spi_irq = -ENOENT,

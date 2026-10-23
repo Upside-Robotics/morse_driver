@@ -2914,7 +2914,8 @@ static int morse_mac_ops_start(struct ieee80211_hw *hw)
 	mors->state_flags &= MORSE_STATE_FLAG_KEEP_ON_START_MASK;
 
 	/* Enable individual AMPDU statistics to improve MMRC performance. */
-	morse_cmd_set_ampdu_feedback(mors, true);
+	if (mors->cfg->ampdu_feedback_enabled)
+		morse_cmd_set_ampdu_feedback(mors, true);
 
 exit:
 	mutex_unlock(&mors->lock);

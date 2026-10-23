@@ -49,10 +49,6 @@ enum ieee80211_s1g_rps_raw_slot_flags {
 
 #define IEEE80211_S1G_RPS_RAW_SLOT_NUM_3BITS		(3)
 #define IEEE80211_S1G_RPS_RAW_SLOT_NUM_6BITS		(6)
-#define IEEE80211_S1G_RPS_RAW_SLOT_NUM_3_MAX \
-	((1 << IEEE80211_S1G_RPS_RAW_SLOT_NUM_3BITS) - 1)
-#define IEEE80211_S1G_RPS_RAW_SLOT_NUM_6_MAX \
-	((1 << IEEE80211_S1G_RPS_RAW_SLOT_NUM_6BITS) - 1)
 
 #define IEEE80211_S1G_RPS_RAW_SLOT_DUR_8BITS		(8)
 #define IEEE80211_S1G_RPS_RAW_SLOT_DUR_11BITS		(11)
@@ -316,7 +312,7 @@ static __le16 morse_raw_generate_slot_definition(struct morse *mors,
 	switch (config->type) {
 	case IEEE80211_S1G_RPS_RAW_TYPE_SOUNDING:
 		cslot_max = (1 << IEEE80211_S1G_RPS_RAW_SLOT_DUR_8BITS) - 1;
-		max_slots = IEEE80211_S1G_RPS_RAW_SLOT_NUM_6_MAX;
+		max_slots = IEEE80211_S1G_RPS_RAW_SLOT_NUM_6BITS;
 		break;
 	case IEEE80211_S1G_RPS_RAW_TYPE_GENERIC:
 	case IEEE80211_S1G_RPS_RAW_TYPE_SIMPLEX:
@@ -325,10 +321,10 @@ static __le16 morse_raw_generate_slot_definition(struct morse *mors,
 		if (cslot > __UINT8_MAX__) {
 			slot_def |= cpu_to_le16(IEEE80211_S1G_RPS_RAW_SLOT_DEF_FORMAT);
 			cslot_max = (1 << IEEE80211_S1G_RPS_RAW_SLOT_DUR_11BITS) - 1;
-			max_slots = IEEE80211_S1G_RPS_RAW_SLOT_NUM_3_MAX;
+			max_slots = IEEE80211_S1G_RPS_RAW_SLOT_NUM_3BITS;
 		} else {
 			cslot_max = (1 << IEEE80211_S1G_RPS_RAW_SLOT_DUR_8BITS) - 1;
-			max_slots = IEEE80211_S1G_RPS_RAW_SLOT_NUM_6_MAX;
+			max_slots = IEEE80211_S1G_RPS_RAW_SLOT_NUM_6BITS;
 		}
 		break;
 	}

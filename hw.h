@@ -517,6 +517,11 @@ struct morse_hw_cfg {
 		bool has_1500_byte_limit;
 	} amsdu;
 
+	/**
+	 * @ampdu_feedback_enabled: Indicated if AMPDU feedback is enabled
+	 */
+	bool ampdu_feedback_enabled;
+
 	/** Host GPIO config */
 	struct morse_gpios gpios;
 

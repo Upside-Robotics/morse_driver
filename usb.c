@@ -872,6 +872,8 @@ static int morse_usb_probe(struct usb_interface *interface, const struct usb_dev
 
 	mutex_lock(&mors->lock);
 		ret = morse_firmware_prepare(mors, reset_hw, morse_hw_should_reattach());
+	if (!ret || ret == -EALREADY)
+		morse_hw_set_state(mors, MORSE_HW_STATE_ON);
 	mutex_unlock(&mors->lock);
 
 	if (ret == -EALREADY)
