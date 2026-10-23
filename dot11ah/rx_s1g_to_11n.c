@@ -12,7 +12,7 @@
 
 #include "dot11ah.h"
 #include "tim.h"
-#include "debug.h"
+#include "dot11ah_debug.h"
 #include "../debug.h"
 #include "../morse.h"
 #include "../mesh.h"
@@ -483,6 +483,10 @@ static u8 *morse_dot11_insert_tim_ie(u8 *pos, const struct dot11ah_ies_mask *ies
 	length = morse_dot11_s1g_to_tim(tim_ie,
 		(const struct dot11ah_s1g_tim_ie *)ies_mask->ies[WLAN_EID_TIM].ptr,
 		ies_mask->ies[WLAN_EID_TIM].len);
+	if (length < 0) {
+		kfree(tim_ie);
+		return pos;
+	}
 
 	pos = morse_dot11_insert_ie(pos, (const u8 *)tim_ie,
 					WLAN_EID_TIM,
@@ -495,14 +499,54 @@ static u8 *morse_dot11_insert_tim_ie(u8 *pos, const struct dot11ah_ies_mask *ies
 
 /* API's to convert the incoming S1G frames into 11n to pass to Linux */
 
+static int morse_dot11_validate_rx_ie(u8 eid, const struct ie_element *elem)
+{
+	switch (eid) {
+	case WLAN_EID_TIM:
+		return morse_dot11_s1g_tim_validate((const struct dot11ah_s1g_tim_ie *)elem->ptr,
+						   elem->len);
+	case WLAN_EID_S1G_BCN_COMPAT:
+		return elem->len == sizeof(struct dot11ah_s1g_bcn_compat_ie) ? 0 : -EINVAL;
+	case WLAN_EID_S1G_SHORT_BCN_INTERVAL:
+		return elem->len == sizeof(struct dot11ah_short_beacon_ie) ? 0 : -EINVAL;
+	case WLAN_EID_S1G_CAPABILITIES:
+		return elem->len >= sizeof(struct ieee80211_s1g_cap) ? 0 : -EINVAL;
+	case WLAN_EID_S1G_OPERATION:
+		return elem->len >= MORSE_S1G_OPERATION_IE_LEN ? 0 : -EINVAL;
+	default:
+		return 0;
+	}
+}
+
+static int morse_dot11_validate_rx_ies(const struct dot11ah_ies_mask *ies_mask)
+{
+	static const u8 eids[] = {
+		WLAN_EID_TIM,
+		WLAN_EID_S1G_BCN_COMPAT,
+		WLAN_EID_S1G_SHORT_BCN_INTERVAL,
+		WLAN_EID_S1G_CAPABILITIES,
+		WLAN_EID_S1G_OPERATION,
+	};
+	const struct ie_element *elem;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(eids); i++) {
+		for (elem = &ies_mask->ies[eids[i]]; elem && elem->ptr; elem = elem->next) {
+			if (morse_dot11_validate_rx_ie(eids[i], elem))
+				return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
 static int morse_dot11_required_rx_ies_size(struct dot11ah_ies_mask *ies_mask,
 	bool include_ht_vht, bool include_ssid, bool include_mesh_id, bool check_wmm)
 {
 	int ht_len = 0;
 	int eid = 0;
 
-	/* Supported rate will always be includes for all rx management frames */
-	ies_mask->ies[WLAN_EID_SUPP_RATES].ptr = NULL;
+	/* Replace every received Supported Rates instance with one synthetic IE. */
 	ht_len += sizeof(__s1g_supp_rates_ie) + 2;
 
 	if (include_ht_vht) {
@@ -521,16 +565,17 @@ static int morse_dot11_required_rx_ies_size(struct dot11ah_ies_mask *ies_mask,
 		struct ie_element *elem;
 
 		if (ies_mask->ies[eid].ptr) {
-			if (eid == WLAN_EID_S1G_OPERATION || eid == WLAN_EID_S1G_CAPABILITIES) {
+			if (eid == WLAN_EID_SUPP_RATES ||
+			    eid == WLAN_EID_S1G_CAPABILITIES) {
 				continue;
 			} else if (!include_ssid && eid == WLAN_EID_SSID) {
 				continue;
 			} else if (!include_mesh_id && eid == WLAN_EID_MESH_ID) {
 				continue;
 			} else if (eid == WLAN_EID_S1G_BCN_COMPAT) {
-				ht_len += sizeof(struct dot11ah_s1g_bcn_compat_ie) + 2;
+				ht_len += ies_mask->ies[eid].len + 2;
 			} else if (eid == WLAN_EID_S1G_SHORT_BCN_INTERVAL) {
-				ht_len += sizeof(struct dot11ah_short_beacon_ie) + 2;
+				ht_len += ies_mask->ies[eid].len + 2;
 			} else if (eid == WLAN_EID_TIM && ies_mask->ies[WLAN_EID_TIM].ptr) {
 				/* Allocate for max size tim. We will trim this down later */
 				ht_len += sizeof(struct ieee80211_tim_ie) + 2 +
@@ -558,13 +603,14 @@ static u8 *morse_dot11ah_insert_required_rx_ie(struct dot11ah_ies_mask *ies_mask
 {
 	int eid = 0;
 
-	/* Supported rate will always be included for all rx management frames */
+	/* Remove received Supported Rates IEs before inserting the synthetic IE. */
+	morse_dot11_clear_eid_from_ies_mask(ies_mask, WLAN_EID_SUPP_RATES);
 	ies_mask->ies[WLAN_EID_SUPP_RATES].ptr = (u8 *)__s1g_supp_rates_ie;
 	ies_mask->ies[WLAN_EID_SUPP_RATES].len = sizeof(__s1g_supp_rates_ie);
 
 	for (eid = 0; eid < DOT11AH_MAX_EID; eid++) {
 		if (ies_mask->ies[eid].ptr) {
-			if (eid == WLAN_EID_S1G_OPERATION || eid == WLAN_EID_S1G_CAPABILITIES) {
+			if (eid == WLAN_EID_S1G_CAPABILITIES) {
 				continue;
 			} else if (check_wmm && eid == WLAN_EID_VENDOR_SPECIFIC) {
 				if (ies_mask->ies[WLAN_EID_VENDOR_SPECIFIC].ptr)
@@ -629,13 +675,8 @@ static int morse_dot11ah_s1g_to_beacon_size(struct ieee80211_vif *vif, struct sk
 {
 	struct ieee80211_mgmt *beacon;
 	struct ieee80211_ext *s1g_beacon = (struct ieee80211_ext *)skb->data;
-	u8 *s1g_ies = s1g_beacon->u.s1g_beacon.variable;
-	int header_length = s1g_ies - skb->data;
-	int s1g_ies_len = skb->len - header_length;
 	int beacon_len;
 	struct morse_dot11ah_cssid_item *item = NULL;
-	u8 *next_tbtt_ptr = NULL;
-	u8 *ano_ptr = NULL;
 	const u8 *rsn_ie = NULL;
 	const u8 *rsnx_ie = NULL;
 	struct morse_vif *mors_vif = ieee80211_vif_to_morse_vif(vif);
@@ -647,26 +688,6 @@ static int morse_dot11ah_s1g_to_beacon_size(struct ieee80211_vif *vif, struct sk
 
 	/* Initially, the size equals to the 11n beacon header */
 	beacon_len = sizeof(struct ieee80211_hdr_3addr) + sizeof(beacon->u.beacon);
-
-	/* Some optional fields may appear before the variable IEs, make sure to account for this
-	 * when determining the start of the IEs.
-	 */
-	if (le16_to_cpu(s1g_beacon->frame_control) & IEEE80211_FC_NEXT_TBTT) {
-		next_tbtt_ptr = s1g_ies;
-		s1g_ies += 3;
-		s1g_ies_len -= 3;
-	}
-
-	if (le16_to_cpu(s1g_beacon->frame_control) & IEEE80211_FC_COMPRESS_SSID) {
-		s1g_ies += 4;
-		s1g_ies_len -= 4;
-	}
-
-	if (le16_to_cpu(s1g_beacon->frame_control) & IEEE80211_FC_ANO) {
-		ano_ptr = s1g_ies;
-		s1g_ies += 1;
-		s1g_ies_len -= 1;
-	}
 
 	/* Mesh Beacons contains WLAN_EID_MESH_ID and wildcard SSID(length zero) IE.
 	 * Use mesh EID instead of ssid EID.
@@ -693,6 +714,12 @@ static int morse_dot11ah_s1g_to_beacon_size(struct ieee80211_vif *vif, struct sk
 			beacon_len = -EINVAL;
 			goto exit;
 		}
+	}
+
+	/* Revalidate after possible changes from cached IEs. */
+	if (morse_dot11_validate_rx_ies(ies_mask)) {
+		beacon_len = -EINVAL;
+		goto exit;
 	}
 
 	if (!ies_mask->ies[network_id_eid].len && item)
@@ -917,8 +944,6 @@ static void morse_dot11ah_s1g_to_beacon(struct ieee80211_vif *vif, struct sk_buf
 	struct morse_dot11ah_cssid_item *item = NULL;
 	bool frame_good = false;
 	u8 *pos = NULL;
-	u8 *next_tbtt_ptr = NULL;
-	u8 *ano_ptr = NULL;
 	struct morse_vif *mors_vif = ieee80211_vif_to_morse_vif(vif);
 	u8 network_id_eid;
 	struct dot11ah_s1g_bcn_compat_ie *s1g_bcn_comp;
@@ -933,7 +958,6 @@ static void morse_dot11ah_s1g_to_beacon(struct ieee80211_vif *vif, struct sk_buf
 		goto exit;
 
 	if (le16_to_cpu(s1g_beacon->frame_control) & IEEE80211_FC_NEXT_TBTT) {
-		next_tbtt_ptr = s1g_ies;
 		s1g_ies += 3;
 		s1g_ies_len -= 3;
 	}
@@ -944,7 +968,6 @@ static void morse_dot11ah_s1g_to_beacon(struct ieee80211_vif *vif, struct sk_buf
 	}
 
 	if (le16_to_cpu(s1g_beacon->frame_control) & IEEE80211_FC_ANO) {
-		ano_ptr = s1g_ies;
 		s1g_ies += 1;
 		s1g_ies_len -= 1;
 	}
@@ -1277,6 +1300,9 @@ int morse_dot11ah_s1g_to_probe_resp_ies_size(struct dot11ah_ies_mask *ies_mask)
 	const bool include_ssid = true;
 	const bool include_mesh_id = true;
 
+	if (morse_dot11_validate_rx_ies(ies_mask))
+		return -EINVAL;
+
 	return morse_dot11_required_rx_ies_size(ies_mask,
 		include_ht_vht, include_ssid, include_mesh_id, check_wmm);
 }
@@ -1440,10 +1466,15 @@ static void morse_dot11ah_s1g_to_assoc_resp(struct ieee80211_vif *vif, struct sk
 	memset(assoc_resp, 0, length_11n);
 	frame_good = true;
 
-	/* Fill in the new association request header, copied from incoming frame */
+	/* Copy the association response header. */
 	memcpy(assoc_resp, s1g_assoc_resp, header_length);
-	assoc_resp->u.assoc_resp.aid =
-		cpu_to_le16(*((u16 *)&ies_mask->ies[WLAN_EID_AID_RESPONSE].ptr[0]));
+
+	/* The IE payload may be unaligned; preserve its little-endian representation. */
+	if (ies_mask->ies[WLAN_EID_AID_RESPONSE].ptr &&
+	    ies_mask->ies[WLAN_EID_AID_RESPONSE].len >= sizeof(assoc_resp->u.assoc_resp.aid))
+		memcpy(&assoc_resp->u.assoc_resp.aid,
+		       ies_mask->ies[WLAN_EID_AID_RESPONSE].ptr,
+		       sizeof(assoc_resp->u.assoc_resp.aid));
 
 	spin_lock_bh(&cssid_list_lock);
 	bssid_item = morse_dot11ah_find_bssid(assoc_resp->bssid);
@@ -1524,7 +1555,6 @@ static int morse_dot11ah_s1g_to_mpm_frame_size(struct ieee80211_vif *vif,
 	struct ieee80211_mgmt *s1g_mpm_frm = (struct ieee80211_mgmt *)skb->data;
 	u8 *s1g_ies = morse_dot11_mpm_frame_ies(s1g_mpm_frm);
 	int header_length = s1g_ies - skb->data;
-	int s1g_ies_len = skb->len - header_length;
 	int action_frame_len;
 	int ampe_len;
 	const bool include_ht_vht = true;
@@ -1535,13 +1565,6 @@ static int morse_dot11ah_s1g_to_mpm_frame_size(struct ieee80211_vif *vif,
 	action_frame_len = header_length;
 
 	ampe_len = morse_dot11_get_mpm_ampe_len(skb);
-
-	/* Note: Supplicant adds AMPE (Authenticated Mesh Peering Exchange) block, which is
-	 * encrypted IE after the MIC IE. AMPE IE block is keys data encrypted and added at the end
-	 * of frame just after MIC IE. Since AMPE is not in Std IE format, parsing of ies will throw
-	 * an error. Reduce the AMPE Len to avoid IE parsing error and restore after parsing.
-	 */
-	s1g_ies_len -= ampe_len;
 
 	action_frame_len += morse_dot11_required_rx_ies_size(ies_mask,
 		include_ht_vht, include_ssid, include_mesh_id, check_wmm);
@@ -1632,6 +1655,9 @@ int morse_dot11ah_s1g_to_11n_rx_packet_size(struct ieee80211_vif *vif, struct sk
 {
 	int size;
 	struct ieee80211_hdr *hdr;
+
+	if (morse_dot11_validate_rx_ies(ies_mask))
+		return -EINVAL;
 
 	hdr = (struct ieee80211_hdr *)skb->data;
 	size = skb->len + skb_tailroom(skb);

@@ -105,6 +105,16 @@ int morse_dot11_s1g_to_tim(struct ieee80211_tim_ie *tim, const struct dot11ah_s1
 			   size_t total_len);
 
 /**
+ * morse_dot11_s1g_tim_validate() - validate an S1G TIM element
+ * @s1g_tim: pointer to the S1G TIM element data.
+ * @total_len: length of the S1G TIM element data.
+ *
+ * Return: 0 when valid, otherwise -EINVAL.
+ */
+int morse_dot11_s1g_tim_validate(const struct dot11ah_s1g_tim_ie *s1g_tim,
+				 size_t total_len);
+
+/**
  * morse_dot11ah_insert_s1g_tim() - translate to S1G TIM and insert into ies_mask
  *
  * @vif: The VIF the IE was received on.

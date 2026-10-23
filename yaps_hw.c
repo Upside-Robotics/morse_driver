@@ -290,7 +290,7 @@ static int morse_yaps_hw_write_pkt_err_check(struct morse_yaps *yaps, struct mor
 {
 	if (pkt->skb->len + yaps->aux_data->reserved_yaps_page_size > YAPS_MAX_PKT_SIZE_BYTES)
 		return -EMSGSIZE;
-	if (pkt->tc_queue > MORSE_YAPS_NUM_TC_Q)
+	if (pkt->tc_queue >= MORSE_YAPS_NUM_TC_Q)
 		return -EINVAL;
 	if (!morse_yaps_will_fit(yaps, pkt, true))
 		return -EAGAIN;

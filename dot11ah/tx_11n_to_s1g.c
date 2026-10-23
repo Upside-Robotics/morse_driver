@@ -14,7 +14,7 @@
 
 #include "dot11ah.h"
 #include "tim.h"
-#include "debug.h"
+#include "dot11ah_debug.h"
 #include "../morse.h"
 #include "../mesh.h"
 #include "../utils.h"
@@ -673,6 +673,68 @@ static void morse_dot11ah_blockack_to_s1g(struct ieee80211_vif *vif, struct sk_b
 #endif
 
 /**
+ * Clear the A-MSDU bit in outbound ADDBA REQ/RESP frames when the local device
+ * requires 1500B A-MSDUs but the peer has not advertised support for that limit.
+ * Without this, a non-Morse peer may send A-MSDUs exceeding 1500B.
+ */
+static void morse_dot11ah_blockack_limit_amsdu(struct ieee80211_vif *vif, struct sk_buff *skb)
+{
+	struct ieee80211_mgmt *back = (struct ieee80211_mgmt *)skb->data;
+	struct morse_vif *mors_vif = (struct morse_vif *)vif->drv_priv;
+	struct ieee80211_sta *sta;
+	bool is_amsdu_set;
+	bool clear_amsdu;
+
+	if (!MORSE_OPS_IN_USE(&mors_vif->operations, AMSDU_1500_BYTE_LIMIT))
+		return;
+
+	switch (MORSE_ADDBA_ACTION_CODE(back)) {
+	case WLAN_ACTION_NDP_ADDBA_REQ:
+		is_amsdu_set = (le16_to_cpu(MORSE_ADDBA_REQ_CAPAB(back)) &
+				IEEE80211_ADDBA_PARAM_AMSDU_MASK);
+		break;
+	case WLAN_ACTION_NDP_ADDBA_RESP:
+		is_amsdu_set = (le16_to_cpu(MORSE_ADDBA_RESP_CAPAB(back)) &
+				IEEE80211_ADDBA_PARAM_AMSDU_MASK);
+		break;
+	default:
+		return;
+	}
+
+	if (!is_amsdu_set)
+		return;
+
+	if (vif->type == NL80211_IFTYPE_STATION) {
+		clear_amsdu = !mors_vif->bss_vendor_info.supports_amsdu_1500_byte_limiting;
+	} else {
+		rcu_read_lock();
+		sta = ieee80211_find_sta(vif, back->da);
+		if (sta) {
+			struct morse_sta *mors_sta = (struct morse_sta *)sta->drv_priv;
+
+			clear_amsdu = !mors_sta->vendor_info.supports_amsdu_1500_byte_limiting;
+		} else {
+			clear_amsdu = true;
+		}
+		rcu_read_unlock();
+	}
+
+	if (!clear_amsdu)
+		return;
+
+	switch (MORSE_ADDBA_ACTION_CODE(back)) {
+	case WLAN_ACTION_NDP_ADDBA_REQ:
+		MORSE_ADDBA_REQ_CAPAB(back) &= ~cpu_to_le16(IEEE80211_ADDBA_PARAM_AMSDU_MASK);
+		break;
+	case WLAN_ACTION_NDP_ADDBA_RESP:
+		MORSE_ADDBA_RESP_CAPAB(back) &= ~cpu_to_le16(IEEE80211_ADDBA_PARAM_AMSDU_MASK);
+		break;
+	default:
+		break;
+	}
+}
+
+/**
  * Utility function to find EDCA parameter IE data in incoming beacon
  * from mac80211. The parameter data can either be part of EDCA IE or
  * WMM IE, which is Vendor specific IE. IEs of the beacon are already
@@ -969,15 +1031,19 @@ static int morse_dot11_get_rsn_caps(const u8 *rsn_ie, u16 *rsn_caps)
 	rsn_ie_len -= RSN_SELECTOR_LEN;
 
 	/* verify and skip pairwise count(2 bytes) and cipher len*/
+	if (rsn_ie_len < 2)
+		return 0;
 	count = le16_to_cpu(*(__le16 *)(rsn_ie));
-	if (rsn_ie_len < (count * RSN_SELECTOR_LEN))
+	if (rsn_ie_len < (2 + count * RSN_SELECTOR_LEN))
 		return 0;
 	rsn_ie += (2 + count * RSN_SELECTOR_LEN);
 	rsn_ie_len -= (2 + count * RSN_SELECTOR_LEN);
 
 	/* verify and skip akm count(2 byte) and akm len*/
+	if (rsn_ie_len < 2)
+		return 0;
 	count = le16_to_cpu(*(__le16 *)(rsn_ie));
-	if (rsn_ie_len < (count * RSN_SELECTOR_LEN))
+	if (rsn_ie_len < (2 + count * RSN_SELECTOR_LEN))
 		return 0;
 	rsn_ie += (2 + count * RSN_SELECTOR_LEN);
 	rsn_ie_len -= (2 + count * RSN_SELECTOR_LEN);
@@ -1067,12 +1133,14 @@ void morse_dot11ah_11n_to_s1g_tx_packet(struct ieee80211_vif *vif,
 	if (ieee80211_is_action(hdr->frame_control)) {
 		struct ieee80211_mgmt *mgmt = (struct ieee80211_mgmt *)hdr;
 
-		if (morse_dot11_is_mpm_frame(mgmt))
+		if (morse_dot11_is_mpm_frame(mgmt)) {
 			morse_dot11ah_mpm_frame_to_s1g(vif, skb, ies_mask);
+		} else if (mgmt->u.action.category == WLAN_CATEGORY_BACK) {
 #if !defined(MORSE_MAC80211_S1G_FEATURE_NDP_BLOCKACK)
-		else if (mgmt->u.action.category == WLAN_CATEGORY_BACK)
 			morse_dot11ah_blockack_to_s1g(vif, skb);
 #endif
+			morse_dot11ah_blockack_limit_amsdu(vif, skb);
+		}
 	}
 
 	if (ieee80211_is_beacon(hdr->frame_control))

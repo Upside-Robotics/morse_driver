@@ -7,11 +7,13 @@
 
 #include <linux/types.h>
 #include <linux/gpio.h>
+#include "mem_access.h"
 #include "morse.h"
 #include "debug.h"
 #include "hw.h"
 #include "bus.h"
 #include "firmware.h"
+#include "mac.h"
 #include "ps.h"
 #include "trace.h"
 
@@ -144,12 +146,16 @@ static void morse_hw_headless_done_irq_handle(struct morse *mors)
 
 int morse_hw_irq_handle(struct morse *mors)
 {
+	int ret;
 	u32 status1 = 0;
 #if defined(CONFIG_MORSE_DEBUG_IRQ)
 	int i;
 #endif
 
-	morse_reg32_read(mors, MORSE_REG_INT1_STS(mors), &status1);
+	ret = morse_reg32_read(mors, MORSE_REG_INT1_STS(mors), &status1);
+	if (ret)
+		goto exit;
+
 	trace_hw_irq(status1);
 	if (!status1)
 		goto exit;
@@ -220,14 +226,24 @@ int morse_hw_reset(int reset_pin)
 	}
 
 	pr_info("Resetting Morse Chip\n");
+	/* Drive the reset pin low then high, to trigger a chip reset. Afterwards,
+	 * configure the GPIO as an input (high impedance) so it does not continue
+	 * driving 3.3 V unnecessarily.
+	 *
+	 * The delays below are conservative and could likely be reduced, as only a
+	 * few milliseconds should be sufficient for the reset sequence.
+	 */
 	gpio_direction_output(reset_pin, 0);
-	mdelay(20);
-	/* setting gpio as float to avoid forcing 3.3V High */
+	mdelay(10);
+	gpio_direction_output(reset_pin, 1);
+	mdelay(10);
 	gpio_direction_input(reset_pin);
 	pr_info("Done\n");
 
 	gpio_free(reset_pin);
 
+	/* Short delay to ensure chip (SPI/SDIO controller) is fully reset */
+	mdelay(20);
 	return ret;
 }
 
@@ -782,7 +798,16 @@ bool morse_hw_should_reattach(void)
 
 bool morse_hw_can_detach(const struct morse *mors)
 {
-	return reattach_hw && !morse_hw_is_stopped(mors) && !mors->recovery.ignore_detach;
+	bool reattach_allowed = reattach_hw;
+
+
+	return reattach_allowed && !morse_hw_is_stopped(mors) && !mors->recovery.ignore_detach;
+}
+
+int morse_hw_get_attach_config(void)
+{
+	bool keep_ifaces = is_fullmac_mode();
+	return keep_ifaces ? MORSE_CMD_HEADLESS_CFG_OPTION_KEEP_IFACES : 0;
 }
 
 static const u8 *hw_state_to_str(enum morse_hw_state state)
@@ -849,4 +874,67 @@ void morse_hw_set_state(struct morse *mors, enum morse_hw_state next)
 	trace_hw_state(hw_state_to_str(state), hw_state_to_str(next));
 	mors->hw_state = next;
 	MORSE_WARN_ON(FEATURE_ID_DEFAULT, !transition_okay);
+}
+
+int morse_hw_digital_reset(struct morse *mors)
+{
+	return mors->cfg->digital_reset(mors);
+}
+
+void morse_hw_clear_aon(struct morse *mors)
+{
+	int idx;
+	u8 count = MORSE_REG_AON_COUNT(mors);
+	u32 address = MORSE_REG_AON_ADDR(mors);
+
+	if (mem_access_is_restriction_enforced(mors)) {
+		MORSE_DBG(mors,
+			  "Memory access restriction is enabled. %s not permitted\n",
+			  __func__);
+		return;
+	}
+
+	if (!address)
+		return;
+
+	for (idx = 0; idx < count; idx++, address += 4) {
+		if (mors->bus_type == MORSE_HOST_BUS_TYPE_USB && idx == 0)
+			/* Keep the USB power domain enabled in AON. */
+			morse_reg32_write(mors, address, MORSE_REG_AON_USB_RESET(mors));
+		else
+			/* clear AON in case there is any latched sleeps */
+			morse_reg32_write(mors, address, 0x0);
+	}
+
+	morse_hw_toggle_aon_latch(mors);
+}
+
+int morse_hw_coredump_if_stopped(struct morse *mors)
+{
+	bool is_stopped = morse_hw_is_stopped(mors) ||
+			  morse_hw_is_stopped_notification_set(mors);
+	char *stop = NULL;
+	int ret = 0;
+
+	lockdep_assert_held(&mors->lock);
+
+	/* Attempt to get stop information string from HW */
+	morse_coredump_get_crash_info(mors, &stop);
+	is_stopped |= ((bool)stop);
+
+	if (is_stopped) {
+		ret = morse_coredump_new(mors,
+					 MORSE_COREDUMP_REASON_STOP_ON_REATTACH);
+		if (!ret)
+			ret = morse_coredump(mors);
+
+		/* Coredump failed, log stop string if present */
+		if (stop && ret)
+			MORSE_ERR(mors, "stop at %s\n", stop);
+
+		kfree(stop);
+		ret = -ENODEV;
+	}
+
+	return ret;
 }

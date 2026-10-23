@@ -8,7 +8,7 @@
 #include <linux/string.h>
 #include "dot11ah.h"
 #include "reg_rules.h"
-#include "debug.h"
+#include "dot11ah_debug.h"
 
 /* Channelization scheme to use */
 static u32 channelization_scheme = CONFIG_MORSE_CHANNELIZATION_SCHEME;
@@ -78,18 +78,40 @@ struct ieee80211_regdomain *morse_regdom_to_ieee80211(const struct morse_regdoma
 }
 EXPORT_SYMBOL(morse_regdom_to_ieee80211);
 
-const struct morse_reg_rule *morse_regdom_get_rule_for_freq(const char *alpha, int frequency)
+const struct morse_reg_rule *morse_regdom_get_rule_for_freq(const char *alpha, u32 freq_khz,
+							    u8 bw_mhz)
 {
 	const struct morse_regdomain *regdom = morse_reg_alpha_lookup(alpha, channelization_scheme);
-	int i;
+	const struct morse_reg_rule *strictest_rule = NULL;
+	u32 bw_khz = MHZ_TO_KHZ(bw_mhz);
+	u32 half_bw_khz = bw_khz / 2;
+	u32 i;
+
+	if (!regdom || !bw_mhz || freq_khz < half_bw_khz)
+		return NULL;
 
 	for (i = 0; i < regdom->n_reg_rules; i++) {
-		if (frequency >= regdom->reg_rules[i].dot11_reg.freq_range.start_freq_khz &&
-			frequency <= regdom->reg_rules[i].dot11_reg.freq_range.end_freq_khz)
-			return &regdom->reg_rules[i];
+		const struct morse_reg_rule *rule = &regdom->reg_rules[i];
+		const struct ieee80211_freq_range *range = &rule->dot11_reg.freq_range;
+
+		/* The rule must cover the channel’s whole bandwidth */
+		if (range->start_freq_khz > freq_khz - half_bw_khz ||
+		    range->end_freq_khz < freq_khz + half_bw_khz)
+			continue;
+
+		/* The rule must also permit a channel this wide. */
+		if (range->max_bandwidth_khz < bw_khz)
+			continue;
+
+		/* Rules are derived per channel and overlap, so more than one can govern a
+		 * channel. Where they do, the most restrictive limit is the one that applies.
+		 */
+		if (!strictest_rule || rule->dot11_reg.power_rule.max_eirp <
+			     strictest_rule->dot11_reg.power_rule.max_eirp)
+			strictest_rule = rule;
 	}
 
-	return NULL;
+	return strictest_rule;
 }
 EXPORT_SYMBOL(morse_regdom_get_rule_for_freq);
 

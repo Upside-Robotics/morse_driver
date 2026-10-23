@@ -10,14 +10,11 @@
 typedef int (*watchdog_callback_t)(struct morse *);
 
 /**
- * morse_watchdog_init() - Initialize the driver's watchdog timer
+ * morse_watchdog_init() - Initialize the driver's watchdog.
  *
- * @mors: The global morse config object
- * @interval_s: The parameter holds the timeout interval in seconds
- * @ping: The pointer to ping callback function
+ * @mors: morse chip instance
  */
-void morse_watchdog_init(struct morse *mors, uint interval_s,
-	watchdog_callback_t ping);
+int morse_watchdog_init(struct morse *mors);
 
 /**
  * morse_watchdog_cleanup() - Cancel an active watchdog timer and
@@ -90,3 +87,21 @@ int morse_watchdog_resume(struct morse *mors);
  * Return interval (if greater than 0) else error code
  */
 uint morse_watchdog_get_interval(struct morse *mors);
+
+/**
+ * morse_watchdog_driver_restart() - Restart the driver.
+ *
+ * @mors: morse chip instance
+ *
+ * Return 0 if success, else error code
+ */
+int morse_watchdog_driver_restart(struct morse *mors);
+
+/**
+ * morse_watchdog_health_check_finish() - Deinitialise the driver's healthcheck and watchdog.
+ *
+ * Calling this in mors->lock context may cause deadlock.
+ *
+ * @mors: morse chip instance
+ */
+void morse_watchdog_health_check_finish(struct morse *mors);

@@ -168,7 +168,7 @@ bool morse_log_is_enabled(enum morse_feature_id id, u8 level);
  */
 void morse_init_log_levels(u8 level);
 
-int morse_init_debug(struct morse *mors);
+int morse_init_debug(struct morse *mors, struct dentry *entry);
 
 void morse_deinit_debug(struct morse *mors);
 
@@ -190,6 +190,16 @@ void morse_log_modparams(struct morse *mors);
 #ifdef CONFIG_MORSE_RC
 void mmrc_s1g_add_sta_debugfs(struct morse *mors);
 void mmrc_s1g_add_mesh_debugfs(struct morse *mors);
+#endif
+
+#ifdef CONFIG_MAC80211_DEBUGFS
+void morse_sta_add_debugfs(struct ieee80211_hw *hw,
+			   struct ieee80211_vif *vif,
+			   struct ieee80211_sta *sta,
+			   struct dentry *dir);
+#if KERNEL_VERSION(6, 7, 0) <= MAC80211_VERSION_CODE
+void morse_vif_add_debugfs(struct ieee80211_hw *hw, struct ieee80211_vif *vif);
+#endif
 #endif
 
 #endif	/* !_MORSE_DEBUG_H_ */

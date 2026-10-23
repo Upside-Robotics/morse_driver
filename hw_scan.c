@@ -243,7 +243,7 @@ static __le32 morse_hw_scan_pack_channel(const struct morse_dot11ah_channel *cha
 					 u8 pwr_idx)
 {
 	u32 packed_channel;
-	u32 freq_khz = morse_dot11ah_channel_to_freq_khz(chan->ch.hw_value);
+	u32 freq_khz = HZ_TO_KHZ(morse_dot11ah_s1g_chan_to_s1g_freq(chan->ch.hw_value));
 	u8 op_bw_mhz = ch_flag_to_chan_bw(chan->ch.flags);
 	/* It is expected that the steps in @ref hw_scan_initialise_channel_and_power_lists will
 	 * deconstruct any non-primary channels into their primary variants.
@@ -287,7 +287,7 @@ static u8 *hw_scan_add_channel_list_tlv(u8 *buf, struct morse_hw_scan_params *pa
 
 		MORSE_HWSCAN_DBG(mors, "[%d] : %08x (freq: %u khz, bw: %d, pwr_idx: %d)\n", i,
 			ch_list->channels[i],
-			morse_dot11ah_channel_to_freq_khz(chan->ch.hw_value),
+			HZ_TO_KHZ(morse_dot11ah_s1g_chan_to_s1g_freq(chan->ch.hw_value)),
 			morse_ratecode_bw_index_to_s1g_bw_mhz(BMGET(le32_to_cpu(ch_list
 				->channels[i]), HW_SCAN_CH_LIST_OP_BW)),
 			params->channels[i].power_idx);
@@ -655,7 +655,8 @@ static int deconstruct_scan_channel_into_scan_list(struct morse_hw_scan_params *
 	}
 
 	MORSE_HWSCAN_DBG(mors, "Deconstructing ch %d (%d kHz, %d MHz) into primaries",
-			 chan->ch.hw_value, morse_dot11ah_channel_to_freq_khz(chan->ch.hw_value),
+			 chan->ch.hw_value,
+			 HZ_TO_KHZ(morse_dot11ah_s1g_chan_to_s1g_freq(chan->ch.hw_value)),
 			 op_bw);
 
 	/* For each primary variant (1MHz & 2MHz), deconstruct the operating bandwidth into its
@@ -664,7 +665,7 @@ static int deconstruct_scan_channel_into_scan_list(struct morse_hw_scan_params *
 	for (prim_bw = 1; prim_bw <= 2; prim_bw++) {
 		for (prim_idx = 0; prim_idx < op_bw; prim_idx += prim_bw) {
 			int ret;
-			int prim_freq_khz;
+			u32 prim_freq_hz;
 			const struct morse_dot11ah_channel *s1g_chan;
 			int prim_chan = morse_dot11ah_calc_prim_s1g_chan(op_bw, prim_bw,
 									 chan->ch.hw_value,
@@ -677,18 +678,18 @@ static int deconstruct_scan_channel_into_scan_list(struct morse_hw_scan_params *
 			if (hw_scan_prim_deconstruct && hw_scan_prim_deconstruct != prim_bw)
 				continue;
 
-			prim_freq_khz = morse_dot11ah_channel_to_freq_khz(prim_chan);
+			prim_freq_hz = morse_dot11ah_s1g_chan_to_s1g_freq(prim_chan);
 
-			s1g_chan = morse_dot11ah_s1g_freq_to_s1g(KHZ_TO_HZ(prim_freq_khz), prim_bw);
+			s1g_chan = morse_dot11ah_s1g_freq_to_s1g(prim_freq_hz, prim_bw);
 			if (!s1g_chan) {
 				MORSE_HWSCAN_ERR(mors,
 						 "   ch %d (%d kHz, %d MHz) Error - undefined",
-						 prim_chan, prim_freq_khz, prim_bw);
+						 prim_chan, HZ_TO_KHZ(prim_freq_hz), prim_bw);
 				continue;
 			}
 
 			MORSE_HWSCAN_DBG(mors, "   ch %d (%d kHz, %d MHz)",
-					 prim_chan, prim_freq_khz, prim_bw);
+					 prim_chan, HZ_TO_KHZ(prim_freq_hz), prim_bw);
 
 			ret = insert_channel_into_hw_scan_list(params, s1g_chan);
 			if (ret)
@@ -1363,8 +1364,8 @@ static void morse_hw_scan_done_handler(struct morse *mors)
 		goto exit;
 	case HW_SCAN_STATE_RUNNING:
 	case HW_SCAN_STATE_ABORTING:
-		mors->hw_scan.state = HW_SCAN_STATE_IDLE;
 		info.aborted = (mors->hw_scan.state == HW_SCAN_STATE_ABORTING);
+		mors->hw_scan.state = HW_SCAN_STATE_IDLE;
 	}
 
 	ieee80211_scan_completed(mors->hw, &info);
@@ -1443,13 +1444,17 @@ void morse_hw_scan_finish(struct morse *mors)
 	else
 		ieee80211_scan_completed(mors->hw, &info);
 
-	cancel_work_sync(&mors->hw_scan.scan_done.work);
 	complete(&mors->hw_scan.scan_done.complete);
 	mors->hw_scan.state = HW_SCAN_STATE_IDLE;
 
-	/* Not using cancel_delayed_work_sync due to lock constraints */
+	/* Not using synchronous variants due to lock constraints. Any in-progress work eventually
+	 * exits cleanly because the state has been forced to idle.
+	 */
 	cancel_delayed_work(&mors->hw_scan.timeout);
 	cancel_delayed_work(&mors->hw_scan.replay_end);
+#if KERNEL_VERSION(6, 0, 0) <= LINUX_VERSION_CODE
+	cancel_work(&mors->hw_scan.scan_done.work);
+#endif
 }
 
 void morse_sched_scan_results_evt(struct ieee80211_hw *hw)

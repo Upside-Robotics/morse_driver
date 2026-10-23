@@ -44,8 +44,9 @@ struct morse_sta_stats {
 	u32 last_rx_iat_us;
 	u64 last_tx_timestamp_us;
 	u64 last_rx_timestamp_us;
-	u32 num_tx_retries;
-	u32 num_rx_retries;
+	u32 num_tx_retries[IEEE80211_NUM_ACS];
+	u32 num_rx_retries[IEEE80211_NUM_ACS];
+	u32 num_tx_dropped[IEEE80211_NUM_ACS];
 	/*
 	 * Keep the following fields at the end of this struct to do the partial reset
 	 * remaining fields and preserve the MCS histograms for longer interval.

@@ -2375,10 +2375,14 @@ void morse_twt_reconfig(struct morse *mors, struct morse_vif *mors_vif)
 {
 	struct morse_persistent_vif_configs *mors_vif_conf =
 					morse_get_vif_conf_from_id(mors, mors_vif->id);
-
-	struct morse_twt_config *twt_conf = &mors_vif_conf->twt_conf;
+	struct morse_twt_config *twt_conf;
 
 	lockdep_assert_held(&mors->persistent_vif_config.lock);
+
+	if (!mors_vif_conf)
+		return;
+
+	twt_conf = &mors_vif_conf->twt_conf;
 
 	/* TWT configured is already removed or no valid agreement present.
 	 * No need to proceed with installation.

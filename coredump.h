@@ -17,23 +17,16 @@ enum morse_coredump_method {
 	COREDUMP_METHOD_BUS              = 1,
 };
 
-/* Describe the type of a memory region */
-enum morse_coredump_mem_region_type {
-	/* no specific distinction made on memory region */
-	MORSE_MEM_REGION_TYPE_GENERAL = 1,
-	/* Assertion information */
-	MORSE_MEM_REGION_TYPE_ASSERT_INFO = 2,
-};
-
 /* Describe an on-chip memory region */
 struct morse_coredump_mem_region {
-	struct list_head list;
-	/* memory region type */
-	enum morse_coredump_mem_region_type type;
-	/* start address of memory region */
-	u32 start;
-	/* length of memory region */
+	u32 addr;
 	u32 len;
+};
+
+/* List node for crash info locations */
+struct morse_crash_info_location {
+	struct list_head list;
+	struct morse_coredump_mem_region region;
 };
 
 enum morse_coredump_reason {
@@ -77,11 +70,8 @@ struct morse_coredump_data {
 	char *information;
 	/* system timestamp of when the data was filled */
 	struct timespec64 timestamp;
-	/* chip-memory regions of interest upon a coredump */
-	struct {
-		/* dynamically allocated to store memory region info / contents */
-		struct list_head regions;
-	} memory;
+	/* Dynamically allocated crash info location list */
+	struct list_head crash_info_locations;
 };
 
 /**
@@ -106,13 +96,15 @@ void morse_coredump_destroy(struct morse *mors);
 int morse_coredump_new(struct morse *mors, enum morse_coredump_reason reason);
 
 /**
- * morse_coredump_get_stop_info() - Get stop information string (if known and set) from HW
+ * morse_coredump_get_crash_info() - Get stop information string (if known and set) from HW
  *
  * @mors: Morse chip object.
  * @info: Reason for chip stop. This will get set if stop reason is retrieved from the HW.
  *        It is the responsibilty of the calling site to free the resultant pointer.
+ *
+ * Return: 0 on success, else error
  */
-void morse_coredump_get_stop_info(struct morse *mors, char **info);
+int morse_coredump_get_crash_info(struct morse *mors, char **info);
 
 /**
  * morse_coredump() - Generate a morse coredump file.
@@ -124,25 +116,26 @@ void morse_coredump_get_stop_info(struct morse *mors, char **info);
 int morse_coredump(struct morse *mors);
 
 /**
- * morse_coredump_add_memory_region() - Add the provided memory region descriptor
- *                                      to the list of on-chip memory regions to
- *                                      read on a coredump.
+ * morse_coredump_add_crash_info_location() - Add the provided memory region descriptor
+ *                                            to the list of on-chip crash info locations
+ *					      to read on a coredump.
  *
  * @mors: Morse chip object
- * @desc: Memory region descriptor from the fw_info TLV
+ * @location: Memory region descriptor from the host table
  *
  * return 0 on success
  */
-int morse_coredump_add_memory_region(struct morse *mors,
-						const struct morse_fw_info_tlv_coredump_mem *desc);
+int morse_coredump_add_crash_info_location(struct morse *mors,
+	const struct extended_host_table_crash_info_location *location);
 
 /**
- * morse_coredump_remove_memory_regions() - Remove all memory region descriptors
- *                                          for core-dumping.
+ * morse_coredump_remove_crash_info_locations() - Remove all crash info locations
+ *						  memory region descriptors
+ *						  for core-dumping.
  *
  * @mors: Morse chip object
  */
-void morse_coredump_remove_memory_regions(struct morse *mors);
+void morse_coredump_remove_crash_info_locations(struct morse *mors);
 
 /**
  * morse_coredump_set_fw_binary_str() - Store the name of fw binary used to

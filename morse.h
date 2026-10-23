@@ -2,7 +2,7 @@
 #define _MORSE_MORSE_H_
 
 /*
- * Copyright 2017-2023 Morse Micro
+ * Copyright 2017-2026 Morse Micro
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
@@ -208,7 +208,7 @@ struct morse_custom_configs {
 	struct morse_channel_info channel_info;
 	struct morse_channel_info default_bw_info;
 	bool enable_arp_offload;
-	bool enable_legacy_amsdu;
+	bool enable_amsdu;
 	bool enable_dhcpc_offload;
 	bool enable_sta_cac;
 	char *dhcpc_lease_update_script;
@@ -320,6 +320,8 @@ struct morse_vendor_info {
 	bool page_slicing_exclusive_support;
 	/** Rate control method in use */
 	enum morse_rc_method rc_method;
+	/** Does device support 1500-byte A-MSDU limiting */
+	bool supports_amsdu_1500_byte_limiting;
 };
 
 /** Morse Private STA record */
@@ -357,6 +359,8 @@ struct morse_sta {
 	struct morse_rc_sta rc;
 	struct mmrc_rate last_sta_tx_rate;
 	struct mmrc_rate last_sta_rx_rate;
+	/** Work to handle mmrc reinitialisation on a peer bandwidth change */
+	struct work_struct rc_update_work;
 #endif
 	/** RX status of last rx skb */
 	struct {
@@ -395,17 +399,25 @@ struct morse_sta {
 	/** non-TIM mode negotiated between AP & STA */
 	enum morse_non_tim_mode non_tim_mode_status;
 
-	/** This is the 1st byte of S1G capabilities IE, stored to retrieve STA's short GI
-	 *  capabilities and supported channel width.
-	 */
-	u8 s1g_cap0;
+	/** Full S1G capabilities IE. */
+	struct {
+		struct ieee80211_s1g_cap ie;
+		u8 ie_len;
+	} s1g_cap;
 
 	/** RAW Priority, extracted from QoS traffic capability IE */
 	u8 raw_priority;
 
 	/** STA entry is in BSS statistics module */
 	struct morse_bss_stats_sta bss_stats_sta;
+	/** Set by debugfs_sta when per-STA debugfs files are registered */
+	bool debugfs_set;
 };
+
+static inline bool morse_sta_debugfs_set(const struct morse_sta *msta)
+{
+	return msta->debugfs_set;
+}
 
 /** Number of bits in AID bitmap.
  * +1 as AID 0 is reserved, and the AID_LIMIT is the 'max' AID
@@ -422,8 +434,6 @@ struct morse_ap {
 	u16 largest_aid;
 	/** RAW state */
 	struct morse_raw raw;
-	/** BSS statistics */
-	struct morse_bss_stats_context bss_stats;
 	/**
 	 * Bitmap of AIDs currently in use. Bit position corresponds to the AID.
 	 */
@@ -772,6 +782,12 @@ struct morse_vif {
 	struct morse_mbssid_info mbssid_info;
 
 	/**
+	 * BSS statistics context. Used by AP mode for the periodic event; also
+	 * holds per-STA stats accessible via debugfs on all VIF types.
+	 */
+	struct morse_bss_stats_context bss_stats;
+
+	/**
 	 * Channel Switch Timer for station mode
 	 */
 	struct timer_list chswitch_timer;
@@ -885,6 +901,16 @@ struct morse_vif {
 
 	/** @autoconnect: Automatically reconnect to given SSID upon disconnect (fullmac only). */
 	bool autoconnect;
+
+	/* Remain-on-channel (fullmac only). */
+	struct {
+		/** @roc.expired_work: Delayed work for ROC expiry. */
+		struct delayed_work expired_work;
+		/** @roc.chan: 5GHz channel currently held for ROC. */
+		struct ieee80211_channel *chan_5g;
+		/** @roc.cookie: Cookie for the current ROC. */
+		u64 cookie;
+	} roc;
 
 	/* ARP filtering related fields (fullmac only) */
 	struct {
@@ -1101,6 +1127,20 @@ struct morse_persistent_vif_configs {
 	u8 bss_color;
 };
 
+/**
+ * Number of bytes of extra padding to be inserted at the start of each tx packet.
+ *
+ * Fullmac firmware needs at most 26 bytes so that it can do 802.3 to 802.11 header
+ * translation in place.
+ *
+ * Arithmetic for this offset:
+ * 1. 12 bytes added to the offset from removing 2 MAC addresses
+ * 2. 6 bytes removed from the offset from adding LLC/SNAP header
+ * 3. 2 bytes removed form the offset from QoS header
+ * 4. 24 bytes removed from the offset from 80211 MAC header, 30 bytes in 4-address mode
+ */
+#define FULLMAC_EXTRA_TX_OFFSET 26
+
 struct morse {
 	u32 chip_id;
 
@@ -1282,6 +1322,7 @@ struct morse {
 #ifdef CONFIG_MORSE_RC
 	struct morse_rc mrc;
 	int rts_threshold;
+	bool enable_individual_agg_stats;
 #endif
 	struct morse_vif mon_if;	/* monitor interface */
 	/**
@@ -1333,7 +1374,7 @@ struct morse {
 	/* Stored configurations per VIF */
 	struct {
 		/* Persistent configurations for different features */
-		struct morse_persistent_vif_configs configs[MORSE_MAX_IF];
+		struct morse_persistent_vif_configs *configs;
 		/* Lock held for the VIF config array */
 		struct mutex lock;
 	} persistent_vif_config;
@@ -1513,6 +1554,9 @@ static inline struct ieee80211_sta *morse_sta_to_ieee80211_sta(struct morse_sta 
 static inline struct morse_persistent_vif_configs *morse_get_vif_conf_from_id(struct morse *mors,
 		int vif_id)
 {
+	if (vif_id < 0 || vif_id >= mors->max_vifs || !mors->persistent_vif_config.configs)
+		return NULL;
+
 	return &mors->persistent_vif_config.configs[vif_id];
 }
 

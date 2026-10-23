@@ -190,8 +190,11 @@ module_param(spi_use_edge_irq, bool, 0644);
 MODULE_PARM_DESC(spi_use_edge_irq, "Enable compatibility for edge IRQs on SPI");
 
 static const struct spi_device_id morse_device_ids[] = {
+	{ MORSE_SPI_DEVICE("mm6104-spi", mm61xx_chip_series) },
+	{ MORSE_SPI_DEVICE("mm6108-spi", mm61xx_chip_series) },
 	{ MORSE_SPI_DEVICE("mm610x-spi", mm61xx_chip_series) },
 	{ MORSE_SPI_DEVICE("mm810x-spi", mm81xx_chip_series) },
+	{ MORSE_SPI_DEVICE("mm8108-spi", mm81xx_chip_series) },
 	{ }
 };
 
@@ -200,6 +203,9 @@ MODULE_DEVICE_TABLE(spi, morse_device_ids);
 static const struct of_device_id morse_spi_of_match[] = {
 	{.compatible = "morse,mm610x-spi", (const void *)&mm61xx_chip_series },
 	{.compatible = "morse,mm810x-spi", (const void *)&mm81xx_chip_series },
+	{.compatible = "morsemicro,mm6104-spi", (const void *)&mm61xx_chip_series },
+	{.compatible = "morsemicro,mm6108-spi", (const void *)&mm61xx_chip_series },
+	{.compatible = "morsemicro,mm8108-spi", (const void *)&mm81xx_chip_series },
 	{ }
 };
 
@@ -1307,15 +1313,7 @@ static void morse_spi_set_irq(struct morse *mors, bool enable)
 
 static void morse_spi_reset(int reset_pin, struct spi_device *spi)
 {
-	unsigned int delay_ms = 80;
-
-	if (enable_ext_xtal_init)
-		delay_ms = 100;
-
 	morse_hw_reset(reset_pin);
-
-	/* Introduce a short delay to make sure the chip/SPI controller is fully reset */
-	mdelay(delay_ms);
 }
 
 #if KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE
@@ -1339,7 +1337,7 @@ static void morse_spi_remove(struct spi_device *spi)
 		is_hw_detached = detach_hw;
 
 		if (!morse_test_mode_enabled(test_mode)) {
-			morse_mac_health_check_finish(mors);
+			morse_watchdog_health_check_finish(mors);
 			morse_mac_unregister(mors);
 			morse_spi_disable_irq(mspi);
 			mors->cfg->ops->finish(mors);
@@ -1471,6 +1469,7 @@ static int morse_spi_probe(struct spi_device *spi)
 	const bool reset_hw = false;
 	bool attach = false;
 	bool attach_failed = false;
+	bool reset_spi = true;
 
 	match = of_match_device(of_match_ptr(morse_spi_of_match), &spi->dev);
 	if (match)
@@ -1562,7 +1561,9 @@ static int morse_spi_probe(struct spi_device *spi)
 	}
 	reset_gpio = gpios.reset;
 
-	if (!morse_hw_should_reattach())
+	reset_spi = !morse_hw_should_reattach();
+
+	if (reset_spi)
 		morse_spi_reset(reset_gpio, spi);
 
 	/* spi init */
@@ -1652,7 +1653,7 @@ static int morse_spi_probe(struct spi_device *spi)
 #endif
 
 	mutex_lock(&mors->lock);
-	ret = morse_firmware_prepare(mors, reset_hw, morse_hw_should_reattach());
+		ret = morse_firmware_prepare(mors, reset_hw, morse_hw_should_reattach());
 	if (!ret || ret == -EALREADY)
 		morse_hw_set_state(mors, MORSE_HW_STATE_ON);
 	mutex_unlock(&mors->lock);
@@ -1719,15 +1720,15 @@ static int morse_spi_probe(struct spi_device *spi)
 	}
 
 	if (!morse_test_mode_enabled(test_mode)) {
-		ret = morse_mac_health_check_init(mors);
+		ret = morse_watchdog_init(mors);
 		if (ret) {
-			MORSE_SPI_ERR(mors, "morse_mac_health_check_init failed %d\n", ret);
+			MORSE_SPI_ERR(mors, "morse_watchdog_health_check_init failed %d\n", ret);
 			goto err_exit;
 		}
 		health_check_init_done = true;
 
 		if (attach) {
-			u32 attach_cfg = morse_mac_get_attach_config();
+			u32 attach_cfg = morse_hw_get_attach_config();
 
 			ret = morse_hw_attach(mors, attach_cfg);
 			if (ret) {
@@ -1761,7 +1762,7 @@ static int morse_spi_probe(struct spi_device *spi)
 
 err_exit:
 	if (health_check_init_done)
-		morse_mac_health_check_finish(mors);
+		morse_watchdog_health_check_finish(mors);
 	if (irq_enabled)
 		morse_spi_remove_irq(mspi);
 	if (ps_initiated)

@@ -190,4 +190,22 @@ bool morse_validate_skb_checksum(u8 *data);
 
 u32 morse_skbq_tx_status_lifetime_ms(void);
 
+/**
+ * morse_skbq_stale_tx_status_timer_init() - Initialise stale tx status timer.
+ *
+ * @mors: Morse device instance.
+ *
+ * @return 0 on success, else error.
+ */
+int morse_skbq_stale_tx_status_timer_init(struct morse *mors);
+
+/**
+ * morse_skbq_stale_tx_status_timer_finish() - Deinitialise stale tx status timer.
+ *
+ * @mors: Morse device instance.
+ *
+ * @return 0 on success, else error.
+ */
+int morse_skbq_stale_tx_status_timer_finish(struct morse *mors);
+
 #endif /* !_MORSE_SKBQ_H_ */

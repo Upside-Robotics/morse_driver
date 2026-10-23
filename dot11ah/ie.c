@@ -14,7 +14,7 @@
 
 #include "dot11ah.h"
 #include "tim.h"
-#include "debug.h"
+#include "dot11ah_debug.h"
 #include "../morse.h"
 #include "../mesh.h"
 
@@ -285,6 +285,7 @@ void morse_dot11_clear_eid_from_ies_mask(struct dot11ah_ies_mask *ies_mask, u8 e
 	if (ies_mask->ies[eid].needs_free)
 		kfree(ies_mask->ies[eid].ptr);
 	memset(&ies_mask->ies[eid], 0, sizeof(ies_mask->ies[eid]));
+	clear_bit(eid, ies_mask->more_than_one_ie);
 }
 EXPORT_SYMBOL(morse_dot11_clear_eid_from_ies_mask);
 
@@ -532,6 +533,7 @@ void morse_dot11ah_mask_ies(struct dot11ah_ies_mask *ies_mask, bool mask_ext_cap
 						    WLAN_EID_SUPPORTED_REGULATORY_CLASSES);
 	}
 }
+EXPORT_SYMBOL(morse_dot11ah_mask_ies);
 
 static bool is_s1g_beacon_a_short_beacon(struct dot11ah_ies_mask *ies_mask)
 {

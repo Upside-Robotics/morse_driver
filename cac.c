@@ -309,6 +309,9 @@ void morse_cac_reconfig(struct morse *mors, struct morse_vif *mors_vif)
 
 	lockdep_assert_held(&mors->persistent_vif_config.lock);
 
+	if (!mors_vif_conf)
+		return;
+
 	cac->conf = &mors_vif_conf->cac_conf;
 }
 

@@ -24,6 +24,7 @@
 struct morse_twt_agreement_data;
 struct morse_queue_params;
 
+
 /**
  * Error numbers the FW may return from commands
  * Defined here as errno numbers are not portable across architectures
@@ -292,6 +293,11 @@ int morse_cmd_set_rts_threshold(struct morse *mors, u32 rts_threshold);
 int morse_cmd_set_cts_to_self(struct morse *mors, bool enabled);
 int morse_cmd_set_channelization_scheme(struct morse *mors, u32 scheme);
 int morse_cmd_set_autoconnect(struct morse *mors, bool autoconnect);
+
+/**
+ * The maximum number of SSIDs we support scanning for in a single scan request.
+ */
+#define SCAN_MAX_SSIDS 1
 int morse_cmd_start_scan(struct morse *mors, u8 n_ssids, const u8 *ssid, size_t ssid_len,
 			 const u8 *extra_ies, size_t extra_ies_len, u32 dwell_time_ms);
 int morse_cmd_abort_scan(struct morse *mors);
@@ -353,6 +359,14 @@ int morse_cmd_beacon_offload(struct morse_vif *mors_vif, enum morse_beacon_offlo
  * Return: 0 on success, else error code
  */
 int morse_cmd_probe_response_offload(struct morse *mors, struct morse_vif *mors_vif, bool enable);
+
+/**
+ * morse_cmd_set_ampdu_feedback() - Configure AMPDU feedback from the chip.
+ *
+ * @mors: Morse structure.
+ * @enable: Controls individual attempt aggregate statistics or use of a 'was_aggregated' flag.
+ */
+int morse_cmd_set_ampdu_feedback(struct morse *mors, bool enable);
 
 /**
  * morse_cmd_set_bss_color_in_s1g_capab() - Set BSS color in S1G capabilities

@@ -11,3 +11,4 @@ output
 *.diff
 *.patch
 coverity/
+compile_commands.json
