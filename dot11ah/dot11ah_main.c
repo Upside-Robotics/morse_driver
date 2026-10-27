@@ -24,16 +24,12 @@
 spinlock_t cssid_list_lock;
 static LIST_HEAD(cssid_list);
 
-/*
- * Static functions used only here
- */
-static int __init morse_dot11ah_init(void)
+int morse_dot11ah_init(void)
 {
 	int ret = 0;
 	u32 scheme = morse_dot11ah_get_channelization_scheme();
 
 	spin_lock_init(&cssid_list_lock);
-	pr_info("Morse Micro Dot11ah driver registration. Version %s\n", DOT11AH_VERSION);
 
 	if (scheme > CHANNELIZATION_SCHEME_IEEE80211_REVMF) {
 		pr_info("Invalid value for channelization_scheme %u, setting to default value %u\n",
@@ -46,7 +42,7 @@ static int __init morse_dot11ah_init(void)
 	return ret;
 }
 
-static void __exit morse_dot11ah_exit(void)
+void morse_dot11ah_exit(void)
 {
 	morse_dot11ah_clear_list();
 }
@@ -265,7 +261,7 @@ bool morse_mac_find_channel_info_for_bssid(const u8 bssid[ETH_ALEN],
 				morse_dot11ah_prim_1mhz_chan_loc_to_idx(info->op_bw_mhz,
 					info->pri_bw_mhz, prim_chan_num, op_chan_num, chan_loc);
 			info->op_chan_freq_hz =
-				KHZ_TO_HZ(morse_dot11ah_channel_to_freq_khz(op_chan_num));
+				morse_dot11ah_s1g_chan_to_s1g_freq(op_chan_num);
 			found = true;
 		}
 	}
@@ -289,10 +285,9 @@ int morse_dot11_find_bssid_on_channel(u32 op_chan_freq_hz, u8 bssid[ETH_ALEN])
 
 		if (op) {
 			u8 ap_chan_num = op[5];
-			u32 ap_freq =
-				morse_dot11ah_channel_to_freq_khz(ap_chan_num);
+			u32 ap_freq = morse_dot11ah_s1g_chan_to_s1g_freq(ap_chan_num);
 
-			if (op_chan_freq_hz == KHZ_TO_HZ(ap_freq)) {
+			if (op_chan_freq_hz == ap_freq) {
 				memcpy(bssid, item->bssid, ETH_ALEN);
 				found = true;
 				break;
@@ -494,11 +489,3 @@ bool morse_dot11ah_is_page_slicing_enabled_on_bss(u8 *bssid)
 	return enabled;
 }
 EXPORT_SYMBOL(morse_dot11ah_is_page_slicing_enabled_on_bss);
-
-module_init(morse_dot11ah_init);
-module_exit(morse_dot11ah_exit);
-
-MODULE_AUTHOR("Morse Micro");
-MODULE_DESCRIPTION("S1G support for Morse Micro drivers");
-MODULE_LICENSE("Dual BSD/GPL");
-MODULE_VERSION(DOT11AH_VERSION);

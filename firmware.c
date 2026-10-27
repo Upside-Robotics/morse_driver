@@ -20,12 +20,12 @@
 #include "bus.h"
 #include "debug.h"
 #include "firmware.h"
-#include "mac.h"
 #include "vendor.h"
 #include "coredump.h"
 #include "mem_access.h"
+#include "hw.h"
 
-#define MAX_NUM_REGDOMS		 32
+#define MAX_NUM_REGDOMS		 80
 #define MAX_FW_BIN_FILE_NAME_LEN 30
 
 struct fw_init_params {
@@ -91,8 +91,6 @@ static void parse_firmware_info(struct morse *mors, const u8 *data, int length)
 	const struct morse_fw_info_tlv *tlv = (const struct morse_fw_info_tlv *)data;
 	const u8 *end = data + length;
 
-	/* Reset the coredump memory descriptor information */
-	morse_coredump_remove_memory_regions(mors);
 	/* Fallback for firmware metadata that does not provide BCF size. */
 	mors->bcf.size = BCF_DEFAULT_SIZE;
 	mors->bcf.address = 0;
@@ -129,10 +127,6 @@ static void parse_firmware_info(struct morse *mors, const u8 *data, int length)
 				break;
 			}
 
-			break;
-		case MORSE_FW_INFO_TLV_COREDUMP_MEM_REGION:
-			morse_coredump_add_memory_region(mors,
-					(struct morse_fw_info_tlv_coredump_mem *)tlv->val);
 			break;
 		default:
 			/* Just skip unknown types */
@@ -413,11 +407,59 @@ struct morse_bcf_fallback_entry {
 	const char *fallback_cc;
 };
 
+/* BCF fallback mapping table. Note that some regions are deliberately not listed here. */
 static const struct morse_bcf_fallback_entry morse_bcf_fallback_table[] = {
 	{ "MX", "US" },
 	{ "AR", "AU" },
 	{ "CL", "AU" },
 	{ "CO", "AU" },
+	{ "AD", "EU" },
+	{ "AL", "EU" },
+	{ "AT", "EU" },
+	{ "BA", "EU" },
+	{ "BE", "EU" },
+	{ "BG", "EU" },
+	{ "CH", "EU" },
+	{ "CY", "EU" },
+	{ "CZ", "EU" },
+	{ "DE", "EU" },
+	{ "DK", "EU" },
+	{ "EE", "EU" },
+	{ "ES", "EU" },
+	{ "FI", "EU" },
+	{ "FR", "EU" },
+	{ "GE", "EU" },
+	{ "GF", "EU" },
+	{ "GR", "EU" },
+	{ "HR", "EU" },
+	{ "HU", "EU" },
+	{ "IE", "EU" },
+	{ "IS", "EU" },
+	{ "IT", "EU" },
+	{ "KE", "EU" },
+	{ "LI", "EU" },
+	{ "LT", "EU" },
+	{ "LU", "EU" },
+	{ "LV", "EU" },
+	{ "MC", "EU" },
+	{ "MD", "EU" },
+	{ "ME", "EU" },
+	{ "MK", "EU" },
+	{ "MT", "EU" },
+	{ "NL", "EU" },
+	{ "NO", "EU" },
+	{ "PL", "EU" },
+	{ "PT", "EU" },
+	{ "RO", "EU" },
+	{ "RS", "EU" },
+	{ "SE", "EU" },
+	{ "SI", "EU" },
+	{ "SK", "EU" },
+	{ "SM", "EU" },
+	{ "TR", "EU" },
+	{ "UA", "EU" },
+	{ "UG", "EU" },
+	{ "VA", "EU" },
 };
 
 /**
@@ -656,37 +698,6 @@ exit:
 	return ret;
 }
 
-static int morse_firmware_reset(struct morse *mors)
-{
-	return mors->cfg->digital_reset(mors);
-}
-
-static void morse_firmware_clear_aon(struct morse *mors)
-{
-	int idx;
-	u8 count = MORSE_REG_AON_COUNT(mors);
-	u32 address = MORSE_REG_AON_ADDR(mors);
-
-	if (mem_access_is_restriction_enforced(mors)) {
-		MORSE_DBG(mors,
-			  "Memory access restriction is enabled. %s not permitted\n",
-			  __func__);
-		return;
-	}
-
-	if (address)
-		for (idx = 0; idx < count; idx++, address += 4) {
-			if (mors->bus_type == MORSE_HOST_BUS_TYPE_USB && idx == 0)
-				/* Keep the USB power domain enabled in AON. */
-				morse_reg32_write(mors, address, MORSE_REG_AON_USB_RESET(mors));
-			else
-				/* clear AON in case there is any latched sleeps */
-				morse_reg32_write(mors, address, 0x0);
-		}
-
-	morse_hw_toggle_aon_latch(mors);
-}
-
 static int morse_firmware_trigger(struct morse *mors)
 {
 	morse_claim_bus(mors);
@@ -694,7 +705,7 @@ static int morse_firmware_trigger(struct morse *mors)
 	 * If not coming from a full reset, some AON flags may be latched.
 	 * Make sure to clear any hanging AON bits (can affect booting).
 	 */
-	morse_firmware_clear_aon(mors);
+	morse_hw_clear_aon(mors);
 
 	if (MORSE_REG_CLK_CTRL(mors) != 0)
 		morse_reg32_write(mors, MORSE_REG_CLK_CTRL(mors), MORSE_REG_CLK_CTRL_VALUE(mors));
@@ -1084,6 +1095,8 @@ int morse_firmware_parse_extended_host_table(struct morse *mors)
 
 	mors->boot_code = MORSE_CMD_BOOT_CODE_NONE;
 
+	morse_coredump_remove_crash_info_locations(mors);
+
 	ret = morse_firmware_get_fw_flags(mors);
 	if (ret)
 		goto exit;
@@ -1148,6 +1161,10 @@ int morse_firmware_parse_extended_host_table(struct morse *mors)
 			mors->boot_code = ((struct extended_host_table_boot_code *)hdr)->code;
 			break;
 
+		case MORSE_FW_HOST_TABLE_TAG_CRASH_INFO_LOCATION:
+			morse_coredump_add_crash_info_location(mors,
+					(struct extended_host_table_crash_info_location *)hdr);
+			break;
 		default:
 			break;
 		}
@@ -1245,7 +1262,7 @@ static int morse_firmware_init_try(struct morse *mors,
 	if (mors->chip_was_reset) {
 		MORSE_WARN(mors, "%s: Chip was already reset", __func__);
 	} else {
-		ret = morse_firmware_reset(mors);
+		ret = morse_hw_digital_reset(mors);
 		if (ret)
 			return ret;
 	}
@@ -1280,7 +1297,7 @@ static int morse_firmware_init_try(struct morse *mors,
 			return ret;
 	}
 
-	if (mors->cfg->get_secureboot_status) {
+	if (mors->cfg->get_secureboot_status && init_params->verify_fw) {
 		u32 secureboot_status = MORSE_SECURE_BOOT_SUCCESS;
 
 		ret = mors->cfg->get_secureboot_status(mors, &secureboot_status);
@@ -1487,26 +1504,7 @@ int morse_firmware_prepare(struct morse *mors, bool reset_hw, bool reattach_hw)
 		}
 
 		if (is_hw_loaded) {
-			char *stop = NULL;
-			bool is_stopped = morse_hw_is_stopped(mors) ||
-					  morse_hw_is_stopped_notification_set(mors);
-
-			/* Attempt to get stop information string from HW */
-			morse_coredump_get_stop_info(mors, &stop);
-			is_stopped |= ((bool)stop);
-
-			if (is_stopped) {
-				ret = morse_coredump_new(mors,
-							 MORSE_COREDUMP_REASON_STOP_ON_REATTACH);
-				if (!ret)
-					ret = morse_coredump(mors);
-
-				/* Coredump failed, log stop string if present */
-				if (stop && ret)
-					MORSE_ERR(mors, "stop at %s\n", stop);
-
-				kfree(stop);
-
+			if (morse_hw_coredump_if_stopped(mors)) {
 				/* Stopped HW requires a full digital reset before downloading
 				 * the firmware
 				 */
@@ -1524,7 +1522,7 @@ int morse_firmware_prepare(struct morse *mors, bool reset_hw, bool reattach_hw)
 			mors->cfg->pre_firmware_ndr(mors);
 
 		morse_claim_bus(mors);
-		morse_firmware_clear_aon(mors);
+		morse_hw_clear_aon(mors);
 		morse_release_bus(mors);
 	}
 
@@ -1544,5 +1542,45 @@ exit:
 	release_firmware(fw);
 	release_firmware(bcf);
 
+	return ret;
+}
+
+int morse_firmware_get_crash_info_locations(struct morse *mors)
+{
+	struct extended_host_table *ext_host_table = NULL;
+	u8 *head, *end;
+	int ret;
+
+	morse_coredump_remove_crash_info_locations(mors);
+
+	ret = morse_firmware_get_host_table_ptr(mors);
+	if (ret)
+		goto exit;
+
+	ret = morse_firmware_read_ext_host_table(mors, &ext_host_table);
+	if (ret || !ext_host_table)
+		goto exit;
+
+	head = ext_host_table->ext_host_table_data_tlvs;
+	end = ((u8 *)ext_host_table) + le32_to_cpu(ext_host_table->extended_host_table_length);
+
+	while (head < end) {
+		struct extended_host_table_tlv_hdr *hdr =
+		    (struct extended_host_table_tlv_hdr *)head;
+
+		if (le16_to_cpu(hdr->tag) == MORSE_FW_HOST_TABLE_TAG_CRASH_INFO_LOCATION)
+			morse_coredump_add_crash_info_location(mors,
+				(struct extended_host_table_crash_info_location *)hdr);
+
+		head += le16_to_cpu(hdr->length);
+		if (hdr->length == 0) {
+			MORSE_WARN(mors, "Found a 0 length TLV in the extended host table\n");
+			break;
+		}
+	}
+
+	kfree(ext_host_table);
+
+exit:
 	return ret;
 }

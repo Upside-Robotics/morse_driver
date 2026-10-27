@@ -823,7 +823,7 @@ void morse_mesh_reconfig(struct morse *mors, struct morse_vif *mors_vif)
 
 	lockdep_assert_held(&mors->persistent_vif_config.lock);
 
-	if (!mesh)
+	if (!mesh || !mors_vif_conf)
 		return;
 
 	mesh->conf = &mors_vif_conf->mesh_conf;

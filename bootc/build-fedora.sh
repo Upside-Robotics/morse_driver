@@ -31,9 +31,9 @@ for kernel in "${kernels[@]}"; do
 done
 
 install -d "$destination/usr/share/doc/morse-driver"
-printf 'release=mm8108-2.1.0\ndriver=%s\nfirmware=%s\ncli=%s\nhostap=%s\n' \
+printf 'release=mm8108-2.2.3\ndriver=%s\nfirmware=%s\ncli=%s\nhostap=%s\n' \
     "$(git -C "$script_dir/.." rev-parse HEAD)" \
-    919f27a6dc2d46a988682d6ff64dd3fdb9ffc465 \
-    c0cb8a379ecd79912aefb954c00392b21e4d0b4e \
-    e7309b438eaec4b82f2db29e8ef7beaca3ca52c6 \
+    1b15599cbbe891de4f27952bc7a24cb5bcf09c52 \
+    f7b9293735e64f4ab99aa9fd75855f7ddbfdcb46 \
+    b1520965c5ae8596725fb4d62e5fd8ab964e580c \
     > "$destination/usr/share/doc/morse-driver/sources"

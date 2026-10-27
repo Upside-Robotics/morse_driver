@@ -1,102 +1,120 @@
 diff --git a/src/utils/morse.c b/src/utils/morse.c
+index 8c83cf2..5d9fa6b 100644
 --- a/src/utils/morse.c
 +++ b/src/utils/morse.c
-@@ -540 +540 @@
--	.cc_list = {"US", "CA", "BR", "MX"},
-+	.cc_list = {{'U', 'S'}, {'C', 'A'}, {'B', 'R'}, {'M', 'X'}},
-@@ -577 +577 @@
--	.cc_list = {"US", "CA", "BR", "MX"},
-+	.cc_list = {{'U', 'S'}, {'C', 'A'}, {'B', 'R'}, {'M', 'X'}},
-@@ -601 +601 @@
--	.cc_list = {"US", "CA", "BR", "MX"},
-+	.cc_list = {{'U', 'S'}, {'C', 'A'}, {'B', 'R'}, {'M', 'X'}},
-@@ -618 +618 @@
--	.cc_list = {"US", "CA", "BR", "MX"},
-+	.cc_list = {{'U', 'S'}, {'C', 'A'}, {'B', 'R'}, {'M', 'X'}},
-@@ -632 +632 @@
--	.cc_list = {"EU", "GB"},
-+	.cc_list = {{'E', 'U'}, {'G', 'B'}},
-@@ -648 +648 @@
+@@ -836 +836 @@ static const struct ah_class us1 = {
+-	.cc_list = {"US", "CA", "BR", "MX", "BS", "BB", "BZ", "CR", "GY", "HN", "JM", "NI", "PA"},
++	.cc_list = {{'U', 'S'}, {'C', 'A'}, {'B', 'R'}, {'M', 'X'}, {'B', 'S'}, {'B', 'B'}, {'B', 'Z'}, {'C', 'R'}, {'G', 'Y'}, {'H', 'N'}, {'J', 'M'}, {'N', 'I'}, {'P', 'A'}},
+@@ -872 +872 @@ static const struct ah_class us2 = {
+-	.cc_list = {"US", "CA", "BR", "MX", "BS", "BB", "BZ", "CR", "GY", "HN", "JM", "NI", "PA"},
++	.cc_list = {{'U', 'S'}, {'C', 'A'}, {'B', 'R'}, {'M', 'X'}, {'B', 'S'}, {'B', 'B'}, {'B', 'Z'}, {'C', 'R'}, {'G', 'Y'}, {'H', 'N'}, {'J', 'M'}, {'N', 'I'}, {'P', 'A'}},
+@@ -895 +895 @@ static const struct ah_class us3 = {
+-	.cc_list = {"US", "CA", "BR", "MX", "BS", "BB", "BZ", "CR", "GY", "HN", "JM", "NI", "PA"},
++	.cc_list = {{'U', 'S'}, {'C', 'A'}, {'B', 'R'}, {'M', 'X'}, {'B', 'S'}, {'B', 'B'}, {'B', 'Z'}, {'C', 'R'}, {'G', 'Y'}, {'H', 'N'}, {'J', 'M'}, {'N', 'I'}, {'P', 'A'}},
+@@ -911 +911 @@ static const struct ah_class us4 = {
+-	.cc_list = {"US", "CA", "BR", "MX", "BS", "BB", "BZ", "CR", "GY", "HN", "JM", "NI", "PA"},
++	.cc_list = {{'U', 'S'}, {'C', 'A'}, {'B', 'R'}, {'M', 'X'}, {'B', 'S'}, {'B', 'B'}, {'B', 'Z'}, {'C', 'R'}, {'G', 'Y'}, {'H', 'N'}, {'J', 'M'}, {'N', 'I'}, {'P', 'A'}},
+@@ -924,6 +924,6 @@ static const struct ah_class eu6 = {
+-	.cc_list = {"EU", "GB", "IN",
+-		    "AL", "AT", "BE", "BA", "BG", "HR", "CY", "CZ", "DK", "EE",
+-		    "FI", "FR", "DE", "GR", "HU", "IS", "IE", "IT", "LV", "LI",
+-		    "LT", "LU", "MT", "MD", "NL", "MK", "NO", "PL", "PT", "RO",
+-		    "SK", "SI", "ES", "SE", "CH", "TR", "AD", "GF", "GE", "KE",
+-		    "MC", "ME", "SM", "RS", "UG", "UA", "VA"},
++	.cc_list = {{'E', 'U'}, {'G', 'B'}, {'I', 'N'},
++		    {'A', 'L'}, {'A', 'T'}, {'B', 'E'}, {'B', 'A'}, {'B', 'G'}, {'H', 'R'}, {'C', 'Y'}, {'C', 'Z'}, {'D', 'K'}, {'E', 'E'},
++		    {'F', 'I'}, {'F', 'R'}, {'D', 'E'}, {'G', 'R'}, {'H', 'U'}, {'I', 'S'}, {'I', 'E'}, {'I', 'T'}, {'L', 'V'}, {'L', 'I'},
++		    {'L', 'T'}, {'L', 'U'}, {'M', 'T'}, {'M', 'D'}, {'N', 'L'}, {'M', 'K'}, {'N', 'O'}, {'P', 'L'}, {'P', 'T'}, {'R', 'O'},
++		    {'S', 'K'}, {'S', 'I'}, {'E', 'S'}, {'S', 'E'}, {'C', 'H'}, {'T', 'R'}, {'A', 'D'}, {'G', 'F'}, {'G', 'E'}, {'K', 'E'},
++		    {'M', 'C'}, {'M', 'E'}, {'S', 'M'}, {'R', 'S'}, {'U', 'G'}, {'U', 'A'}, {'V', 'A'}},
+@@ -940 +940 @@ static const struct ah_class eu6 = {
+-		.cc_list = {"IN"},
++		.cc_list = {{'I', 'N'}},
+@@ -954 +954 @@ static const struct ah_class jp8 = {
 -	.cc_list = {"JP"},
 +	.cc_list = {{'J', 'P'}},
-@@ -665 +665 @@
+@@ -970 +970 @@ static const struct ah_class jp9 = {
 -	.cc_list = {"JP"},
 +	.cc_list = {{'J', 'P'}},
-@@ -678 +678 @@
+@@ -982 +982 @@ static const struct ah_class jp10 = {
 -	.cc_list = {"JP"},
 +	.cc_list = {{'J', 'P'}},
-@@ -691 +691 @@
+@@ -994 +994 @@ static const struct ah_class jp11 = {
 -	.cc_list = {"JP"},
 +	.cc_list = {{'J', 'P'}},
-@@ -701 +701 @@
+@@ -1003 +1003 @@ static const struct ah_class jp12 = {
 -	.cc_list = {"JP"},
 +	.cc_list = {{'J', 'P'}},
-@@ -711 +711 @@
+@@ -1019 +1019 @@ static const struct ah_class jp195 = {
+-	.cc_list = {"JP"},
++	.cc_list = {{'J', 'P'}},
+@@ -1031 +1031 @@ static const struct ah_class jp196 = {
+-	.cc_list = {"JP"},
++	.cc_list = {{'J', 'P'}},
+@@ -1041 +1041 @@ static const struct ah_class kr14 = {
 -	.cc_list = {"KR"},
 +	.cc_list = {{'K', 'R'}},
-@@ -732 +732 @@
--	.cc_list = {"KR"},
-+	.cc_list = {{'K', 'R'}},
-@@ -748 +748 @@
--	.cc_list = {"KR"},
-+	.cc_list = {{'K', 'R'}},
-@@ -760 +760 @@
+@@ -1057 +1057 @@ static const struct ah_class sg18 = {
 -	.cc_list = {"SG"},
 +	.cc_list = {{'S', 'G'}},
-@@ -779 +779 @@
+@@ -1075 +1075 @@ static const struct ah_class sg20 = {
 -	.cc_list = {"SG"},
 +	.cc_list = {{'S', 'G'}},
-@@ -794 +794 @@
+@@ -1089 +1089 @@ static const struct ah_class sg21 = {
 -	.cc_list = {"SG"},
 +	.cc_list = {{'S', 'G'}},
-@@ -807 +807 @@
+@@ -1101 +1101 @@ static const struct ah_class au22_2020 = {
 -	.cc_list = {"AU"},
 +	.cc_list = {{'A', 'U'}},
-@@ -831 +831 @@
+@@ -1124 +1124 @@ static const struct ah_class au23_2020 = {
 -	.cc_list = {"AU"},
 +	.cc_list = {{'A', 'U'}},
-@@ -848 +848 @@
+@@ -1140 +1140 @@ static const struct ah_class au24_2020 = {
 -	.cc_list = {"AU"},
 +	.cc_list = {{'A', 'U'}},
-@@ -862 +862 @@
+@@ -1153 +1153 @@ static const struct ah_class au25_2020 = {
 -	.cc_list = {"AU"},
 +	.cc_list = {{'A', 'U'}},
-@@ -874 +874 @@
--	.cc_list = {"AU", "AR", "CL", "CO"},
-+	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}},
-@@ -897 +897 @@
--	.cc_list = {"AU", "AR", "CL", "CO"},
-+	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}},
-@@ -915 +915 @@
--	.cc_list = {"AU", "AR", "CL", "CO"},
-+	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}},
-@@ -930 +930 @@
--	.cc_list = {"AU", "AR", "CL", "CO"},
-+	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}},
-@@ -944 +944 @@
--	.cc_list = {"AU", "AR", "CL", "CO"},
-+	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}},
-@@ -958 +958 @@
--	.cc_list = {"AU", "AR", "CL", "CO"},
-+	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}},
-@@ -970 +970 @@
+@@ -1164 +1164 @@ static const struct ah_class au22 = {
+-	.cc_list = {"AU", "AR", "CL", "CO", "EC", "SV", "HT", "UY"},
++	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}, {'E', 'C'}, {'S', 'V'}, {'H', 'T'}, {'U', 'Y'}},
+@@ -1186 +1186 @@ static const struct ah_class au23 = {
+-	.cc_list = {"AU", "AR", "CL", "CO", "EC", "SV", "HT", "UY"},
++	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}, {'E', 'C'}, {'S', 'V'}, {'H', 'T'}, {'U', 'Y'}},
+@@ -1203 +1203 @@ static const struct ah_class au24 = {
+-	.cc_list = {"AU", "AR", "CL", "CO", "EC", "SV", "HT", "UY"},
++	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}, {'E', 'C'}, {'S', 'V'}, {'H', 'T'}, {'U', 'Y'}},
+@@ -1217 +1217 @@ static const struct ah_class au25 = {
+-	.cc_list = {"AU", "AR", "CL", "CO", "EC", "SV", "HT", "UY"},
++	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}, {'E', 'C'}, {'S', 'V'}, {'H', 'T'}, {'U', 'Y'}},
+@@ -1230 +1230 @@ static const struct ah_class au39 = {
+-	.cc_list = {"AU", "AR", "CL", "CO", "EC", "SV", "HT", "UY"},
++	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}, {'E', 'C'}, {'S', 'V'}, {'H', 'T'}, {'U', 'Y'}},
+@@ -1243 +1243 @@ static const struct ah_class au40 = {
+-	.cc_list = {"AU", "AR", "CL", "CO", "EC", "SV", "HT", "UY"},
++	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}, {'E', 'C'}, {'S', 'V'}, {'H', 'T'}, {'U', 'Y'}},
+@@ -1254 +1254 @@ static const struct ah_class nz26 = {
 -	.cc_list = {"NZ"},
 +	.cc_list = {{'N', 'Z'}},
-@@ -995 +995 @@
+@@ -1278 +1278 @@ static const struct ah_class nz27 = {
 -	.cc_list = {"NZ"},
 +	.cc_list = {{'N', 'Z'}},
-@@ -1012 +1012 @@
+@@ -1294 +1294 @@ static const struct ah_class nz28 = {
 -	.cc_list = {"NZ"},
 +	.cc_list = {{'N', 'Z'}},
-@@ -1026 +1026 @@
+@@ -1307 +1307 @@ static const struct ah_class nz29 = {
 -	.cc_list = {"NZ"},
 +	.cc_list = {{'N', 'Z'}},
-@@ -1038 +1038 @@
--	.cc_list = {"ZZ"}, /* Setting to ZZ till operating class 77 is supported */
-+	.cc_list = {{'Z', 'Z'}}, /* Setting to ZZ till operating class 77 is supported */
-@@ -1052 +1052 @@
+@@ -1318,3 +1318,3 @@ static const struct ah_class eu30 = {
+-	.cc_list = {"AT", "BE", "BG", "FI", "FR", "GB", "IS", "IE", "IT", "LT",
+-		    "MD", "MK", "PT", "SK", "SI", "SE", "TR", "UG", "CY", "DK",
+-		    "HU", "LV", "PL", "ES", "LU"},
++	.cc_list = {{'A', 'T'}, {'B', 'E'}, {'B', 'G'}, {'F', 'I'}, {'F', 'R'}, {'G', 'B'}, {'I', 'S'}, {'I', 'E'}, {'I', 'T'}, {'L', 'T'},
++		    {'M', 'D'}, {'M', 'K'}, {'P', 'T'}, {'S', 'K'}, {'S', 'I'}, {'S', 'E'}, {'T', 'R'}, {'U', 'G'}, {'C', 'Y'}, {'D', 'K'},
++		    {'H', 'U'}, {'L', 'V'}, {'P', 'L'}, {'E', 'S'}, {'L', 'U'}},
+@@ -1329 +1329 @@ static const struct ah_class eu30 = {
+-		.cc_list = {"BG", "FI", "FR", "GB", "IT", "TR", "LU"},
++		.cc_list = {{'B', 'G'}, {'F', 'I'}, {'F', 'R'}, {'G', 'B'}, {'I', 'T'}, {'T', 'R'}, {'L', 'U'}},
+@@ -1342 +1342 @@ static const struct ah_class sg31 = {
 -	.cc_list = {"SG"},
 +	.cc_list = {{'S', 'G'}},
-@@ -1064 +1064 @@
--	.cc_list = {"IN"},
-+	.cc_list = {{'I', 'N'}},

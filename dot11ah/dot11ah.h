@@ -95,7 +95,6 @@
 
 #define DOT11AH_MAX_ZERO_LEN_IES_IN_FRAME (IEEE80211_MAX_FRAME_LEN / 2)
 
-#define DOT11AH_VERSION __stringify(MORSE_VERSION)
 /**
  * The Primary Channel Width subfield, located in B0 of this
  * field, and the BSS Operating Channel Width subfield,
@@ -391,26 +390,6 @@ struct morse_dot11ah_cssid_item {
 	u16 max_away_duration;
 };
 
-/*
- * This table is also in hostap.
- * The presence of a regdom does not mean that it is necessarily
- * supported in the firmware.
- */
-enum morse_dot11ah_region {
-	MORSE_AU,
-	MORSE_BR,
-	MORSE_CA,
-	MORSE_EU,
-	MORSE_GB,
-	MORSE_IN,
-	MORSE_JP,
-	MORSE_KR,
-	MORSE_NZ,
-	MORSE_SG,
-	MORSE_US,
-	REGION_UNSET = 0xFF,
-};
-
 struct morse_channel_info {
 	/** Operating Channel Frequency Hz */
 	u32 op_chan_freq_hz;
@@ -451,6 +430,9 @@ struct s1g_operation_parameters {
 	u8 s1g_operating_class;
 	u8 prim_global_op_class;
 };
+
+/* IEEE 802.11-2024 9.4.2.211 S1G Operation element payload length. */
+#define MORSE_S1G_OPERATION_IE_LEN	6
 
 struct dot11ah_update_rx_beacon_vals {
 	__le16 capab_info;
@@ -837,7 +819,17 @@ int morse_dot11_insert_ordered_ies_from_ies_mask(struct sk_buff *skb, u8 *pos,
 					struct dot11ah_ies_mask *ies_mask,
 					__le16 frame_control);
 
-const struct morse_reg_rule *morse_regdom_get_rule_for_freq(const char *alpha, int frequency);
+/**
+ * morse_regdom_get_rule_for_freq() - Find the regulatory rule governing a channel.
+ *
+ * @alpha: Country code to look up.
+ * @freq_khz: Center frequency of the channel, in kHz.
+ * @bw_mhz: Bandwidth of the channel, in MHz.
+ *
+ * Return: The governing rule, or NULL if @alpha is unknown or no rule covers the channel.
+ */
+const struct morse_reg_rule *morse_regdom_get_rule_for_freq(const char *alpha, u32 freq_khz,
+							    u8 bw_mhz);
 
 struct ieee80211_regdomain *morse_regdom_to_ieee80211(const struct morse_regdomain *morse_domain);
 
@@ -875,8 +867,6 @@ void morse_dot11ah_set_channelization_scheme(u32 value);
 const char *morse_dot11ah_channelization_scheme_to_str(u32 value);
 
 int morse_dot11ah_freq_khz_bw_mhz_to_chan(u32 freq, u8 bw);
-
-int morse_dot11ah_channel_to_freq_khz(int chan);
 
 /**
  * morse_dot11ah_s1g_chan_bw_to_5g_chan() - Lookup the HT/VHT channel mapped to an S1G channel.
@@ -956,6 +946,18 @@ const struct morse_regdomain *morse_reg_alpha_lookup(const char *alpha, u32 chan
 int morse_dot11ah_fill_channel_list(struct morse_channel *list);
 
 void morse_dot11ah_debug_init(u32 mask);
+
+/**
+ * morse_dot11ah_init() - Initialise the dot11ah subsystem.
+ *
+ * Return: 0 on success.
+ */
+int morse_dot11ah_init(void);
+
+/**
+ * morse_dot11ah_exit() - Tear down the dot11ah subsystem.
+ */
+void morse_dot11ah_exit(void);
 
 u32 morse_dot11ah_s1g_chan_to_s1g_freq(int chan_s1g);
 u16 morse_dot11ah_5g_chan_to_s1g_ch(u8 chan_5g, u8 op_class);

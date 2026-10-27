@@ -8,7 +8,7 @@ else
 endif
 
 # Set 0 to a version number. This is done to match the Linux expectations
-override MORSE_VERSION = "0-rel_mm8108_2_1_0_2026_Jul_01"
+override MORSE_VERSION = "0-rel_mm8108_2_2_3"
 
 USING_CLANG := $(shell $(CC) -v 2>&1 | grep -c "clang version")
 
@@ -58,6 +58,10 @@ endif
 CONFIG_MORSE_COUNTRY ?= "AU"
 ccflags-y += "-DCONFIG_MORSE_COUNTRY=\"$(CONFIG_MORSE_COUNTRY)\""
 
+# Default channelization_scheme to CHANNELIZATION_SCHEME_IEEE80211_REVMF
+CONFIG_MORSE_CHANNELIZATION_SCHEME ?= 3
+ccflags-y += "-DCONFIG_MORSE_CHANNELIZATION_SCHEME=$(CONFIG_MORSE_CHANNELIZATION_SCHEME)"
+
 # Default debug_mask to MORSE_MSG_ERR
 CONFIG_MORSE_DEBUG_MASK ?= 8
 ccflags-y += "-DCONFIG_MORSE_DEBUG_MASK=$(CONFIG_MORSE_DEBUG_MASK)"
@@ -80,6 +84,8 @@ ifneq ($(CONFIG_DISABLE_MORSE_FULLMAC),y)
 endif
 ifneq ($(CONFIG_DISABLE_MORSE_RC),y)
 	ccflags-y += "-DCONFIG_MORSE_RC"
+	ccflags-y += "-DDEBUG_STATISTICS=1"
+
 ifeq ($(CONFIG_ANDROID),y)
 	ccflags-y += "-I$(srctree)/$(src)/mmrc"
 else
@@ -134,25 +140,20 @@ ifneq ($(MORSE_TRACE_PATH),)
 	ccflags-y += -DMORSE_TRACE_PATH=$(MORSE_TRACE_PATH)
 endif
 
-obj-$(CONFIG_WLAN_VENDOR_MORSE) += morse.o dot11ah/
-obj-$(CONFIG_MORSE_KUNIT_TEST) += tests/
+obj-$(CONFIG_WLAN_VENDOR_MORSE) += morse.o
 
 morse-y = mac.o
 morse-y += init.o
-morse-y += skbq.o
 morse-y += debug.o
+morse-$(CONFIG_MAC80211_DEBUGFS) += debugfs_sta.o
+morse-$(CONFIG_MAC80211_DEBUGFS) += debugfs_vif.o
 morse-y += trace.o
-morse-y += mm8108.o
+morse-y += mm81xx.o
 morse-y += mm6108.o
-morse-y += command.o
 morse-y += hw.o
 morse-y += beacon.o
-morse-y += pageset.o
 morse-y += pager_hw.o
 morse-y += ps.o
-morse-y += raw.o
-morse-y += twt.o
-morse-y += cac.o
 morse-y += ndpprobe.o
 morse-y += of.o
 morse-y += firmware.o
@@ -162,22 +163,27 @@ morse-y += watchdog.o
 morse-y += event.o
 morse-y += crc16_xmodem.o
 morse-y += offload.o
-morse-y += vendor_ie.o
 morse-y += bus_test.o
 morse-y += ocs.o
 morse-y += mbssid.o
 morse-y += mem_access.o
-morse-y += mesh.o
-morse-y += page_slicing.o
-morse-y += pv1.o
 morse-y += hw_scan.o
 morse-y += coredump.o
 morse-y += peer.o
 morse-y += led.o
-morse-y += bss_stats.o
 morse-y += hw_beacon.o
 morse-y += sysfs.o
 morse-y += scan_result_cache.o
+
+# dot11ah subsystem
+morse-y += dot11ah/dot11ah_main.o
+morse-y += dot11ah/dot11ah_debug.o
+morse-y += dot11ah/ie.o
+morse-y += dot11ah/reg.o
+morse-y += dot11ah/s1g_ieee80211.o
+morse-y += dot11ah/s1g_channels.o
+morse-y += dot11ah/reg_rules.o
+
 morse-$(CONFIG_PM) += wowlan.o
 morse-$(CONFIG_MORSE_MONITOR) += monitor.o
 morse-$(CONFIG_MORSE_SDIO) += sdio.o
@@ -187,6 +193,21 @@ morse-$(CONFIG_MORSE_VENDOR_COMMAND) += vendor.o
 morse-$(CONFIG_MORSE_USER_ACCESS) += uaccess.o
 morse-$(CONFIG_MORSE_HW_TRACE) += hw_trace.o
 morse-$(CONFIG_ANDROID) += apf.o
+
+morse-y += command.o
+morse-y += page_slicing.o
+morse-y += pageset.o
+morse-y += skbq.o
+morse-y += raw.o
+morse-y += twt.o
+morse-y += bss_stats.o
+morse-y += vendor_ie.o
+morse-y += cac.o
+morse-y += pv1.o
+morse-y += mesh.o
+morse-y += dot11ah/tim.o
+morse-y += dot11ah/tx_11n_to_s1g.o
+morse-y += dot11ah/rx_s1g_to_11n.o
 
 ifneq ($(CONFIG_DISABLE_MORSE_FULLMAC),y)
 	morse-y += wiphy.o
@@ -211,6 +232,6 @@ modules_install:
 clean:
 	rm -f  $(morse-y) *.o *~ core .depend .*.cmd *.ko *.mod.c
 	rm -f Module.markers Module.symvers modules.order
+	rm -f dot11ah/*.o dot11ah/.*.cmd
 	rm -rf .tmp_versions Modules.symvers
-	make -C ./dot11ah clean
 	make -C ./tests clean

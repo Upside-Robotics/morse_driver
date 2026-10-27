@@ -237,10 +237,8 @@ static int morse_yaps_read_pkt(struct morse_yaps *yaps, struct sk_buff *skb)
 	skb_len = sizeof(*hdr) + hdr->offset + le16_to_cpu(hdr->len);
 	skb_bytes_remaining = morse_skbq_space(mq);
 
-#ifdef MORSE_YAPS_SUPPORTS_BENCHMARK
 	if (hdr->channel == MORSE_SKB_CHAN_LOOPBACK)
 		atomic_inc(&yaps->benchmark_cnt_fc);
-#endif
 
 	/* if skb queue full, don't read */
 	if (skb_len > skb_bytes_remaining) {
@@ -357,11 +355,9 @@ static int morse_yaps_tx(struct morse_yaps *yaps, struct morse_skbq *mq)
 			break;
 		}
 		pfirst = __skb_dequeue(&skbq_to_send);
-#ifdef MORSE_YAPS_SUPPORTS_BENCHMARK
 		hdr = (struct morse_buff_skb_header *)pfirst->data;
 		if (hdr->channel == MORSE_SKB_CHAN_LOOPBACK)
 			atomic_inc(&yaps->benchmark_cnt_tc);
-#endif
 		__skb_queue_tail(&skbq_sent, pfirst);
 	}
 
@@ -805,7 +801,6 @@ void morse_yaps_show(struct morse_yaps *yaps, struct seq_file *file)
 	yaps->ops->show(yaps, file);
 }
 
-#ifdef MORSE_YAPS_SUPPORTS_BENCHMARK
 int morse_yaps_benchmark(struct morse *mors, struct seq_file *file)
 {
 	int rc = 0;
@@ -832,10 +827,9 @@ int morse_yaps_benchmark(struct morse *mors, struct seq_file *file)
 	start_time = jiffies;
 	max_time = start_time + msecs_to_jiffies(BENCHMARK_WAIT_MS);
 	while (time_before(jiffies, max_time)) {
-		skb = dev_alloc_skb(BENCHMARK_PKT_LEN);
+		skb = morse_skbq_alloc_skb(mq, BENCHMARK_PKT_LEN);
 		if (!skb)
 			goto exit;
-		skb_put(skb, BENCHMARK_PKT_LEN);
 		memcpy(skb->data, body, BENCHMARK_PKT_LEN);
 		skb_set_queue_mapping(skb, IEEE80211_AC_VO);
 
@@ -879,4 +873,3 @@ exit:
 	kfree(body);
 	return 0;
 }
-#endif

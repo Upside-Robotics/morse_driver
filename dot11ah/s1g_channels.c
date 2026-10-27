@@ -22,12 +22,9 @@
 #define CHANNEL_FLAGS_BW_MASK 0x7c000
 
 /**
- * Morse dot11ah S1G channel list.
- *
- * Includes mapping to 5G channels
+ * Morse dot11ah S1G channel operations.
  */
-struct morse_dot11ah_ch_map {
-	char alpha[3];
+struct morse_dot11ah_ch_ops {
 	int (*prim_1mhz_channel_loc_to_idx)(int op_bw_mhz,
 					    int pr_bw_mhz,
 					    int pr_chan_num,
@@ -43,6 +40,16 @@ struct morse_dot11ah_ch_map {
 				 int primary_channel_width_mhz,
 				 bool pri_1_mhz_loc_upper);
 	int (*transform_overlapping_5g_chan)(int chan_5g);
+};
+
+/**
+ * Morse dot11ah S1G channel list.
+ *
+ * Includes mapping to 5G channels
+ */
+struct morse_dot11ah_ch_map {
+	char alpha[3];
+	const struct morse_dot11ah_ch_ops *ops;
 	u32 num_mapped_channels;
 	struct morse_dot11ah_channel *s1g_channels;
 	u32 channelization_scheme;
@@ -158,12 +165,24 @@ static int calculate_primary_s1g_channel_default(int op_bw_mhz, int pr_bw_mhz,
 static int calculate_primary_s1g_channel_jp(int op_bw_mhz, int pr_bw_mhz, int chan_centre_freq_num,
 					    int pr_1mhz_chan_idx)
 {
+	int chan_loc = (pr_1mhz_chan_idx % 2);
 	int offset;
 
 	switch (op_bw_mhz) {
 	case 1:
 		return chan_centre_freq_num;
 	case 2:
+		/* The JP850 2MHz channel is numbered contiguously with its 1MHz primaries
+		 * (94 and 96), so it follows the default derivation rather than the offsets
+		 * used by the JP 920MHz channels.
+		 */
+		if (chan_centre_freq_num == 95) {
+			if (pr_bw_mhz == 1)
+				return chan_centre_freq_num + ((chan_loc == 0) ? -1 : 1);
+			if (pr_bw_mhz == 2)
+				return chan_centre_freq_num;
+			return -EINVAL;
+		}
 		if (pr_bw_mhz == 1) {
 			offset = pr_1mhz_chan_idx ? 13 : 11;
 			return (chan_centre_freq_num + offset);
@@ -318,6 +337,8 @@ static int get_pri_1mhz_chan_jp(int primary_channel,
 			return pri_1_mhz_loc_upper ? 19 : 17;
 		case 8:
 			return pri_1_mhz_loc_upper ? 21 : 19;
+		case 95:
+			return pri_1_mhz_loc_upper ? 96 : 94;
 		default:
 			return -ENOENT;
 		}
@@ -328,14 +349,34 @@ static int get_pri_1mhz_chan_jp(int primary_channel,
 	}
 }
 
+static const struct morse_dot11ah_ch_ops mors_ch_ops_default = {
+	.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_default,
+	.calculate_primary_s1g = &calculate_primary_s1g_channel_default,
+	.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_default,
+	.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
+	.transform_overlapping_5g_chan = NULL,
+};
+
+static const struct morse_dot11ah_ch_ops mors_ch_ops_au = {
+	.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_au,
+	.calculate_primary_s1g = &calculate_primary_s1g_channel_au,
+	.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_au,
+	.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
+	.transform_overlapping_5g_chan = &transform_overlapping_5g_chan_au,
+};
+
+static const struct morse_dot11ah_ch_ops mors_ch_ops_jp = {
+	.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_jp,
+	.calculate_primary_s1g = &calculate_primary_s1g_channel_jp,
+	.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_jp,
+	.get_pri_1mhz_chan = &get_pri_1mhz_chan_jp,
+	.transform_overlapping_5g_chan = &transform_overlapping_5g_chan_jp,
+};
+
 /* AU map as per 802.11-2020 channelization */
 static const struct morse_dot11ah_ch_map mors_au_2020_map = {
 		.alpha = CHANNEL_ALPHA_AU,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_default,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_default,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_default,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = NULL,
+		.ops = &mors_ch_ops_default,
 		.num_mapped_channels = ARRAY_SIZE(au_2020_s1g_channels),
 		.s1g_channels = au_2020_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_IEEE80211_2020,
@@ -344,11 +385,7 @@ static const struct morse_dot11ah_ch_map mors_au_2020_map = {
 /* AU map as per 802.11-2024 channelization */
 static const struct morse_dot11ah_ch_map mors_au_2024_map = {
 		.alpha = CHANNEL_ALPHA_AU,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_au,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_au,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_au,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = &transform_overlapping_5g_chan_au,
+		.ops = &mors_ch_ops_au,
 		.num_mapped_channels = ARRAY_SIZE(au_2024_s1g_channels),
 		.s1g_channels = au_2024_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_IEEE80211_2024,
@@ -357,11 +394,7 @@ static const struct morse_dot11ah_ch_map mors_au_2024_map = {
 /* AU map as per 802.11-REVmf channelization */
 static const struct morse_dot11ah_ch_map mors_au_map = {
 		.alpha = CHANNEL_ALPHA_AU,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_au,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_au,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_au,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = &transform_overlapping_5g_chan_au,
+		.ops = &mors_ch_ops_au,
 		.num_mapped_channels = ARRAY_SIZE(au_s1g_channels),
 		.s1g_channels = au_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_IEEE80211_REVMF,
@@ -370,11 +403,7 @@ static const struct morse_dot11ah_ch_map mors_au_map = {
 /* BR map */
 static const struct morse_dot11ah_ch_map mors_br_map = {
 		.alpha = CHANNEL_ALPHA_BR,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_default,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_default,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_default,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = NULL,
+		.ops = &mors_ch_ops_default,
 		.num_mapped_channels = ARRAY_SIZE(br_s1g_channels),
 		.s1g_channels = br_s1g_channels,
 };
@@ -382,11 +411,7 @@ static const struct morse_dot11ah_ch_map mors_br_map = {
 /* NZ map */
 static const struct morse_dot11ah_ch_map mors_nz_map = {
 		.alpha = CHANNEL_ALPHA_NZ,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_default,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_default,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_default,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = NULL,
+		.ops = &mors_ch_ops_default,
 		.num_mapped_channels = ARRAY_SIZE(nz_s1g_channels),
 		.s1g_channels = nz_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
@@ -395,11 +420,7 @@ static const struct morse_dot11ah_ch_map mors_nz_map = {
 /* CA map */
 static const struct morse_dot11ah_ch_map mors_ca_map = {
 		.alpha = CHANNEL_ALPHA_CA,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_default,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_default,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_default,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = NULL,
+		.ops = &mors_ch_ops_default,
 		.num_mapped_channels = ARRAY_SIZE(ca_s1g_channels),
 		.s1g_channels = ca_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
@@ -408,11 +429,7 @@ static const struct morse_dot11ah_ch_map mors_ca_map = {
 /* EU map */
 static const struct morse_dot11ah_ch_map mors_eu_map = {
 		.alpha = CHANNEL_ALPHA_EU,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_default,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_default,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_default,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = NULL,
+		.ops = &mors_ch_ops_default,
 		.num_mapped_channels = ARRAY_SIZE(eu_s1g_channels),
 		.s1g_channels = eu_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
@@ -421,11 +438,7 @@ static const struct morse_dot11ah_ch_map mors_eu_map = {
 /* GB map */
 static const struct morse_dot11ah_ch_map mors_gb_map = {
 		.alpha = CHANNEL_ALPHA_GB,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_default,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_default,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_default,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = NULL,
+		.ops = &mors_ch_ops_default,
 		.num_mapped_channels = ARRAY_SIZE(gb_s1g_channels),
 		.s1g_channels = gb_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
@@ -434,11 +447,7 @@ static const struct morse_dot11ah_ch_map mors_gb_map = {
 /* IN map */
 static const struct morse_dot11ah_ch_map mors_in_map = {
 		.alpha = CHANNEL_ALPHA_IN,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_default,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_default,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_default,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = NULL,
+		.ops = &mors_ch_ops_default,
 		.num_mapped_channels = ARRAY_SIZE(in_s1g_channels),
 		.s1g_channels = in_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
@@ -447,11 +456,7 @@ static const struct morse_dot11ah_ch_map mors_in_map = {
 /* JP map */
 static const struct morse_dot11ah_ch_map mors_jp_map = {
 		.alpha = CHANNEL_ALPHA_JP,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_jp,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_jp,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_jp,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_jp,
-		.transform_overlapping_5g_chan = &transform_overlapping_5g_chan_jp,
+		.ops = &mors_ch_ops_jp,
 		.num_mapped_channels = ARRAY_SIZE(jp_s1g_channels),
 		.s1g_channels = jp_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
@@ -460,11 +465,7 @@ static const struct morse_dot11ah_ch_map mors_jp_map = {
 /* KR map */
 static const struct morse_dot11ah_ch_map mors_kr_map = {
 		.alpha = CHANNEL_ALPHA_KR,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_default,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_default,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_default,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = NULL,
+		.ops = &mors_ch_ops_default,
 		.num_mapped_channels = ARRAY_SIZE(kr_s1g_channels),
 		.s1g_channels = kr_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
@@ -473,11 +474,7 @@ static const struct morse_dot11ah_ch_map mors_kr_map = {
 /* SG map */
 static const struct morse_dot11ah_ch_map mors_sg_map = {
 		.alpha = CHANNEL_ALPHA_SG,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_default,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_default,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_default,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = NULL,
+		.ops = &mors_ch_ops_default,
 		.num_mapped_channels = ARRAY_SIZE(sg_s1g_channels),
 		.s1g_channels = sg_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
@@ -486,11 +483,7 @@ static const struct morse_dot11ah_ch_map mors_sg_map = {
 /* US map */
 static const struct morse_dot11ah_ch_map mors_us_map = {
 		.alpha = CHANNEL_ALPHA_US,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_default,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_default,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_default,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = NULL,
+		.ops = &mors_ch_ops_default,
 		.num_mapped_channels = ARRAY_SIZE(us_s1g_channels),
 		.s1g_channels = us_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
@@ -498,73 +491,657 @@ static const struct morse_dot11ah_ch_map mors_us_map = {
 
 static const struct morse_dot11ah_ch_map mors_mx_map = {
 		.alpha = CHANNEL_ALPHA_MX,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_default,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_default,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_default,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = NULL,
-		.num_mapped_channels = ARRAY_SIZE(us_s1g_channels),
-		.s1g_channels = us_s1g_channels,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(mx_s1g_channels),
+		.s1g_channels = mx_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
 };
 
 /* CL map as per AU REVmf channelization */
 static const struct morse_dot11ah_ch_map mors_cl_map = {
 		.alpha = CHANNEL_ALPHA_CL,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_au,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_au,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_au,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = &transform_overlapping_5g_chan_au,
-		.num_mapped_channels = ARRAY_SIZE(au_s1g_channels),
-		.s1g_channels = au_s1g_channels,
+		.ops = &mors_ch_ops_au,
+		.num_mapped_channels = ARRAY_SIZE(cl_s1g_channels),
+		.s1g_channels = cl_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_IEEE80211_REVMF,
 };
 
 /* AR map as per AU REVmf channelization */
 static const struct morse_dot11ah_ch_map mors_ar_map = {
 		.alpha = CHANNEL_ALPHA_AR,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_au,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_au,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_au,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = &transform_overlapping_5g_chan_au,
-		.num_mapped_channels = ARRAY_SIZE(au_s1g_channels),
-		.s1g_channels = au_s1g_channels,
+		.ops = &mors_ch_ops_au,
+		.num_mapped_channels = ARRAY_SIZE(ar_s1g_channels),
+		.s1g_channels = ar_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_IEEE80211_REVMF,
 };
 
 /* CO map as per AU REVmf channelization */
 static const struct morse_dot11ah_ch_map mors_co_map = {
 		.alpha = CHANNEL_ALPHA_CO,
-		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_au,
-		.calculate_primary_s1g = &calculate_primary_s1g_channel_au,
-		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_au,
-		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
-		.transform_overlapping_5g_chan = &transform_overlapping_5g_chan_au,
-		.num_mapped_channels = ARRAY_SIZE(au_s1g_channels),
-		.s1g_channels = au_s1g_channels,
+		.ops = &mors_ch_ops_au,
+		.num_mapped_channels = ARRAY_SIZE(co_s1g_channels),
+		.s1g_channels = co_s1g_channels,
 		.channelization_scheme = CHANNELIZATION_SCHEME_IEEE80211_REVMF,
 };
 
+/* EC map as per AU REVmf channelization */
+static const struct morse_dot11ah_ch_map mors_ec_map = {
+		.alpha = CHANNEL_ALPHA_EC,
+		.ops = &mors_ch_ops_au,
+		.num_mapped_channels = ARRAY_SIZE(ec_s1g_channels),
+		.s1g_channels = ec_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_IEEE80211_REVMF,
+};
+
+/* HT map as per AU REVmf channelization */
+static const struct morse_dot11ah_ch_map mors_ht_map = {
+		.alpha = CHANNEL_ALPHA_HT,
+		.ops = &mors_ch_ops_au,
+		.num_mapped_channels = ARRAY_SIZE(ht_s1g_channels),
+		.s1g_channels = ht_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_IEEE80211_REVMF,
+};
+
+/* SV map as per AU REVmf channelization */
+static const struct morse_dot11ah_ch_map mors_sv_map = {
+		.alpha = CHANNEL_ALPHA_SV,
+		.ops = &mors_ch_ops_au,
+		.num_mapped_channels = ARRAY_SIZE(sv_s1g_channels),
+		.s1g_channels = sv_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_IEEE80211_REVMF,
+};
+
+/* UY map as per AU REVmf channelization */
+static const struct morse_dot11ah_ch_map mors_uy_map = {
+		.alpha = CHANNEL_ALPHA_UY,
+		.ops = &mors_ch_ops_au,
+		.num_mapped_channels = ARRAY_SIZE(uy_s1g_channels),
+		.s1g_channels = uy_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_IEEE80211_REVMF,
+};
+
+/* AD map */
+static const struct morse_dot11ah_ch_map mors_ad_map = {
+		.alpha = CHANNEL_ALPHA_AD,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(ad_s1g_channels),
+		.s1g_channels = ad_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* AL map */
+static const struct morse_dot11ah_ch_map mors_al_map = {
+		.alpha = CHANNEL_ALPHA_AL,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(al_s1g_channels),
+		.s1g_channels = al_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* AT map */
+static const struct morse_dot11ah_ch_map mors_at_map = {
+		.alpha = CHANNEL_ALPHA_AT,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(at_s1g_channels),
+		.s1g_channels = at_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* BA map */
+static const struct morse_dot11ah_ch_map mors_ba_map = {
+		.alpha = CHANNEL_ALPHA_BA,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(ba_s1g_channels),
+		.s1g_channels = ba_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* BB map */
+static const struct morse_dot11ah_ch_map mors_bb_map = {
+		.alpha = CHANNEL_ALPHA_BB,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(bb_s1g_channels),
+		.s1g_channels = bb_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* BE map */
+static const struct morse_dot11ah_ch_map mors_be_map = {
+		.alpha = CHANNEL_ALPHA_BE,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(be_s1g_channels),
+		.s1g_channels = be_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* BG map */
+static const struct morse_dot11ah_ch_map mors_bg_map = {
+		.alpha = CHANNEL_ALPHA_BG,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(bg_s1g_channels),
+		.s1g_channels = bg_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* BS map */
+static const struct morse_dot11ah_ch_map mors_bs_map = {
+		.alpha = CHANNEL_ALPHA_BS,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(bs_s1g_channels),
+		.s1g_channels = bs_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* BZ map */
+static const struct morse_dot11ah_ch_map mors_bz_map = {
+		.alpha = CHANNEL_ALPHA_BZ,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(bz_s1g_channels),
+		.s1g_channels = bz_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* CH map */
+static const struct morse_dot11ah_ch_map mors_ch_map = {
+		.alpha = CHANNEL_ALPHA_CH,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(ch_s1g_channels),
+		.s1g_channels = ch_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* CR map */
+static const struct morse_dot11ah_ch_map mors_cr_map = {
+		.alpha = CHANNEL_ALPHA_CR,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(cr_s1g_channels),
+		.s1g_channels = cr_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* CY map */
+static const struct morse_dot11ah_ch_map mors_cy_map = {
+		.alpha = CHANNEL_ALPHA_CY,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(cy_s1g_channels),
+		.s1g_channels = cy_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* CZ map */
+static const struct morse_dot11ah_ch_map mors_cz_map = {
+		.alpha = CHANNEL_ALPHA_CZ,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(cz_s1g_channels),
+		.s1g_channels = cz_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* DE map */
+static const struct morse_dot11ah_ch_map mors_de_map = {
+		.alpha = CHANNEL_ALPHA_DE,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(de_s1g_channels),
+		.s1g_channels = de_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* DK map */
+static const struct morse_dot11ah_ch_map mors_dk_map = {
+		.alpha = CHANNEL_ALPHA_DK,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(dk_s1g_channels),
+		.s1g_channels = dk_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* EE map */
+static const struct morse_dot11ah_ch_map mors_ee_map = {
+		.alpha = CHANNEL_ALPHA_EE,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(ee_s1g_channels),
+		.s1g_channels = ee_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* ES map */
+static const struct morse_dot11ah_ch_map mors_es_map = {
+		.alpha = CHANNEL_ALPHA_ES,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(es_s1g_channels),
+		.s1g_channels = es_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* FI map */
+static const struct morse_dot11ah_ch_map mors_fi_map = {
+		.alpha = CHANNEL_ALPHA_FI,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(fi_s1g_channels),
+		.s1g_channels = fi_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* FR map */
+static const struct morse_dot11ah_ch_map mors_fr_map = {
+		.alpha = CHANNEL_ALPHA_FR,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(fr_s1g_channels),
+		.s1g_channels = fr_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* GE map */
+static const struct morse_dot11ah_ch_map mors_ge_map = {
+		.alpha = CHANNEL_ALPHA_GE,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(ge_s1g_channels),
+		.s1g_channels = ge_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* GF map */
+static const struct morse_dot11ah_ch_map mors_gf_map = {
+		.alpha = CHANNEL_ALPHA_GF,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(gf_s1g_channels),
+		.s1g_channels = gf_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* GR map */
+static const struct morse_dot11ah_ch_map mors_gr_map = {
+		.alpha = CHANNEL_ALPHA_GR,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(gr_s1g_channels),
+		.s1g_channels = gr_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* GY map */
+static const struct morse_dot11ah_ch_map mors_gy_map = {
+		.alpha = CHANNEL_ALPHA_GY,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(gy_s1g_channels),
+		.s1g_channels = gy_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* HN map */
+static const struct morse_dot11ah_ch_map mors_hn_map = {
+		.alpha = CHANNEL_ALPHA_HN,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(hn_s1g_channels),
+		.s1g_channels = hn_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* HR map */
+static const struct morse_dot11ah_ch_map mors_hr_map = {
+		.alpha = CHANNEL_ALPHA_HR,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(hr_s1g_channels),
+		.s1g_channels = hr_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* HU map */
+static const struct morse_dot11ah_ch_map mors_hu_map = {
+		.alpha = CHANNEL_ALPHA_HU,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(hu_s1g_channels),
+		.s1g_channels = hu_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* IE map */
+static const struct morse_dot11ah_ch_map mors_ie_map = {
+		.alpha = CHANNEL_ALPHA_IE,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(ie_s1g_channels),
+		.s1g_channels = ie_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* IS map */
+static const struct morse_dot11ah_ch_map mors_is_map = {
+		.alpha = CHANNEL_ALPHA_IS,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(is_s1g_channels),
+		.s1g_channels = is_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* IT map */
+static const struct morse_dot11ah_ch_map mors_it_map = {
+		.alpha = CHANNEL_ALPHA_IT,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(it_s1g_channels),
+		.s1g_channels = it_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* JM map */
+static const struct morse_dot11ah_ch_map mors_jm_map = {
+		.alpha = CHANNEL_ALPHA_JM,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(jm_s1g_channels),
+		.s1g_channels = jm_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* KE map */
+static const struct morse_dot11ah_ch_map mors_ke_map = {
+		.alpha = CHANNEL_ALPHA_KE,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(ke_s1g_channels),
+		.s1g_channels = ke_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* LI map */
+static const struct morse_dot11ah_ch_map mors_li_map = {
+		.alpha = CHANNEL_ALPHA_LI,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(li_s1g_channels),
+		.s1g_channels = li_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* LT map */
+static const struct morse_dot11ah_ch_map mors_lt_map = {
+		.alpha = CHANNEL_ALPHA_LT,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(lt_s1g_channels),
+		.s1g_channels = lt_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* LU map */
+static const struct morse_dot11ah_ch_map mors_lu_map = {
+		.alpha = CHANNEL_ALPHA_LU,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(lu_s1g_channels),
+		.s1g_channels = lu_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* LV map */
+static const struct morse_dot11ah_ch_map mors_lv_map = {
+		.alpha = CHANNEL_ALPHA_LV,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(lv_s1g_channels),
+		.s1g_channels = lv_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* MC map */
+static const struct morse_dot11ah_ch_map mors_mc_map = {
+		.alpha = CHANNEL_ALPHA_MC,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(mc_s1g_channels),
+		.s1g_channels = mc_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* MD map */
+static const struct morse_dot11ah_ch_map mors_md_map = {
+		.alpha = CHANNEL_ALPHA_MD,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(md_s1g_channels),
+		.s1g_channels = md_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* ME map */
+static const struct morse_dot11ah_ch_map mors_me_map = {
+		.alpha = CHANNEL_ALPHA_ME,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(me_s1g_channels),
+		.s1g_channels = me_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* MK map */
+static const struct morse_dot11ah_ch_map mors_mk_map = {
+		.alpha = CHANNEL_ALPHA_MK,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(mk_s1g_channels),
+		.s1g_channels = mk_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* MT map */
+static const struct morse_dot11ah_ch_map mors_mt_map = {
+		.alpha = CHANNEL_ALPHA_MT,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(mt_s1g_channels),
+		.s1g_channels = mt_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* NI map */
+static const struct morse_dot11ah_ch_map mors_ni_map = {
+		.alpha = CHANNEL_ALPHA_NI,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(ni_s1g_channels),
+		.s1g_channels = ni_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* NL map */
+static const struct morse_dot11ah_ch_map mors_nl_map = {
+		.alpha = CHANNEL_ALPHA_NL,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(nl_s1g_channels),
+		.s1g_channels = nl_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* NO map */
+static const struct morse_dot11ah_ch_map mors_no_map = {
+		.alpha = CHANNEL_ALPHA_NO,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(no_s1g_channels),
+		.s1g_channels = no_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* PA map */
+static const struct morse_dot11ah_ch_map mors_pa_map = {
+		.alpha = CHANNEL_ALPHA_PA,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(pa_s1g_channels),
+		.s1g_channels = pa_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* PL map */
+static const struct morse_dot11ah_ch_map mors_pl_map = {
+		.alpha = CHANNEL_ALPHA_PL,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(pl_s1g_channels),
+		.s1g_channels = pl_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* PT map */
+static const struct morse_dot11ah_ch_map mors_pt_map = {
+		.alpha = CHANNEL_ALPHA_PT,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(pt_s1g_channels),
+		.s1g_channels = pt_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* RO map */
+static const struct morse_dot11ah_ch_map mors_ro_map = {
+		.alpha = CHANNEL_ALPHA_RO,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(ro_s1g_channels),
+		.s1g_channels = ro_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* RS map */
+static const struct morse_dot11ah_ch_map mors_rs_map = {
+		.alpha = CHANNEL_ALPHA_RS,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(rs_s1g_channels),
+		.s1g_channels = rs_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* SE map */
+static const struct morse_dot11ah_ch_map mors_se_map = {
+		.alpha = CHANNEL_ALPHA_SE,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(se_s1g_channels),
+		.s1g_channels = se_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* SI map */
+static const struct morse_dot11ah_ch_map mors_si_map = {
+		.alpha = CHANNEL_ALPHA_SI,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(si_s1g_channels),
+		.s1g_channels = si_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* SK map */
+static const struct morse_dot11ah_ch_map mors_sk_map = {
+		.alpha = CHANNEL_ALPHA_SK,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(sk_s1g_channels),
+		.s1g_channels = sk_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* SM map */
+static const struct morse_dot11ah_ch_map mors_sm_map = {
+		.alpha = CHANNEL_ALPHA_SM,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(sm_s1g_channels),
+		.s1g_channels = sm_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* TR map */
+static const struct morse_dot11ah_ch_map mors_tr_map = {
+		.alpha = CHANNEL_ALPHA_TR,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(tr_s1g_channels),
+		.s1g_channels = tr_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* UA map */
+static const struct morse_dot11ah_ch_map mors_ua_map = {
+		.alpha = CHANNEL_ALPHA_UA,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(ua_s1g_channels),
+		.s1g_channels = ua_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* UG map */
+static const struct morse_dot11ah_ch_map mors_ug_map = {
+		.alpha = CHANNEL_ALPHA_UG,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(ug_s1g_channels),
+		.s1g_channels = ug_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
+/* VA map */
+static const struct morse_dot11ah_ch_map mors_va_map = {
+		.alpha = CHANNEL_ALPHA_VA,
+		.ops = &mors_ch_ops_default,
+		.num_mapped_channels = ARRAY_SIZE(va_s1g_channels),
+		.s1g_channels = va_s1g_channels,
+		.channelization_scheme = CHANNELIZATION_SCHEME_NONE,
+};
+
 const struct morse_dot11ah_ch_map *mapped_channels[] = {
+	&mors_ad_map,
+	&mors_al_map,
 	&mors_ar_map,
+	&mors_at_map,
 	&mors_au_2020_map,
 	&mors_au_2024_map,
 	&mors_au_map,
+	&mors_ba_map,
+	&mors_bb_map,
+	&mors_be_map,
+	&mors_bg_map,
 	&mors_br_map,
+	&mors_bs_map,
+	&mors_bz_map,
 	&mors_ca_map,
+	&mors_ch_map,
 	&mors_cl_map,
 	&mors_co_map,
+	&mors_cr_map,
+	&mors_cy_map,
+	&mors_cz_map,
+	&mors_de_map,
+	&mors_dk_map,
+	&mors_ec_map,
+	&mors_ee_map,
+	&mors_es_map,
 	&mors_eu_map,
+	&mors_fi_map,
+	&mors_fr_map,
 	&mors_gb_map,
+	&mors_ge_map,
+	&mors_gf_map,
+	&mors_gr_map,
+	&mors_gy_map,
+	&mors_hn_map,
+	&mors_hr_map,
+	&mors_ht_map,
+	&mors_hu_map,
+	&mors_ie_map,
 	&mors_in_map,
+	&mors_is_map,
+	&mors_it_map,
+	&mors_jm_map,
 	&mors_jp_map,
+	&mors_ke_map,
 	&mors_kr_map,
+	&mors_li_map,
+	&mors_lt_map,
+	&mors_lu_map,
+	&mors_lv_map,
+	&mors_mc_map,
+	&mors_md_map,
+	&mors_me_map,
+	&mors_mk_map,
+	&mors_mt_map,
 	&mors_mx_map,
+	&mors_ni_map,
+	&mors_nl_map,
+	&mors_no_map,
 	&mors_nz_map,
+	&mors_pa_map,
+	&mors_pl_map,
+	&mors_pt_map,
+	&mors_ro_map,
+	&mors_rs_map,
+	&mors_se_map,
 	&mors_sg_map,
+	&mors_si_map,
+	&mors_sk_map,
+	&mors_sm_map,
+	&mors_sv_map,
+	&mors_tr_map,
+	&mors_ua_map,
+	&mors_ug_map,
 	&mors_us_map,
+	&mors_uy_map,
+	&mors_va_map,
 };
 
 static const struct morse_dot11ah_ch_map *__mors_s1g_map;
@@ -599,77 +1176,30 @@ int morse_dot11ah_channel_set_map(const char *alpha, u32 channelization_scheme)
 	if (!__mors_s1g_map)
 		return -ENOENT;
 
-	if (WARN_ON(!__mors_s1g_map->prim_1mhz_channel_loc_to_idx))
+	if (WARN_ON(!__mors_s1g_map->ops))
 		return -ENOENT;
 
-	if (WARN_ON(!__mors_s1g_map->calculate_primary_s1g))
+	if (WARN_ON(!__mors_s1g_map->ops->prim_1mhz_channel_loc_to_idx))
 		return -ENOENT;
 
-	if (WARN_ON(!__mors_s1g_map->prim_1mhz_channel_loc_to_idx))
+	if (WARN_ON(!__mors_s1g_map->ops->calculate_primary_s1g))
 		return -ENOENT;
 
-	if (WARN_ON(!__mors_s1g_map->get_pri_1mhz_chan))
+	if (WARN_ON(!__mors_s1g_map->ops->s1g_op_chan_pri_chan_to_5g))
+		return -ENOENT;
+
+	if (WARN_ON(!__mors_s1g_map->ops->get_pri_1mhz_chan))
 		return -ENOENT;
 
 	return 0;
-}
-
-/* Convert a regional ISO alpha-2 string to a morse_region */
-static enum morse_dot11ah_region morse_reg_get_region(const char *alpha)
-{
-	if (!alpha)
-		return REGION_UNSET;
-
-	if (!strcmp(alpha, "AU"))
-		return MORSE_AU;
-
-	if (!strcmp(alpha, "BR"))
-		return MORSE_BR;
-
-	if (!strcmp(alpha, "CA"))
-		return MORSE_CA;
-
-	if (!strcmp(alpha, "EU"))
-		return MORSE_EU;
-
-	if (!strcmp(alpha, "GB"))
-		return MORSE_GB;
-
-	if (!strcmp(alpha, "IN"))
-		return MORSE_IN;
-
-	if (!strcmp(alpha, "JP"))
-		return MORSE_JP;
-
-	if (!strcmp(alpha, "KR"))
-		return MORSE_KR;
-
-	if (!strcmp(alpha, "NZ"))
-		return MORSE_NZ;
-
-	if (!strcmp(alpha, "SG"))
-		return MORSE_SG;
-
-	if (!strcmp(alpha, "US"))
-		return MORSE_US;
-
-	/* Countries using US channelization */
-	if (!strcmp(alpha, "MX"))
-		return MORSE_US;
-
-	/* Countries using AU REVmf channelization */
-	if (!strcmp(alpha, "AR") || !strcmp(alpha, "CL") || !strcmp(alpha, "CO"))
-		return MORSE_AU;
-
-	return REGION_UNSET;
 }
 
 static struct morse_dot11ah_channel *lookup_s1g_chan_from_5g_chan(int chan_5g)
 {
 	int ch;
 
-	if (__mors_s1g_map->transform_overlapping_5g_chan)
-		chan_5g = __mors_s1g_map->transform_overlapping_5g_chan(chan_5g);
+	if (__mors_s1g_map->ops->transform_overlapping_5g_chan)
+		chan_5g = __mors_s1g_map->ops->transform_overlapping_5g_chan(chan_5g);
 
 	for (ch = 0; ch < __mors_s1g_map->num_mapped_channels; ch++) {
 		if (chan_5g == __mors_s1g_map->s1g_channels[ch].hw_value_map)
@@ -715,7 +1245,7 @@ u32 morse_dot11ah_s1g_chan_to_s1g_freq(int chan_s1g)
 			return KHZ_TO_HZ(ieee80211_channel_to_khz(chan));
 	}
 
-	return false;
+	return 0;
 }
 EXPORT_SYMBOL(morse_dot11ah_s1g_chan_to_s1g_freq);
 
@@ -803,7 +1333,7 @@ EXPORT_SYMBOL(morse_dot11ah_s1g_chan_bw_to_5g_chan);
 
 int morse_dot11ah_s1g_op_chan_pri_chan_to_5g(int s1g_op_chan, int s1g_pri_chan)
 {
-	return __mors_s1g_map->s1g_op_chan_pri_chan_to_5g(s1g_op_chan, s1g_pri_chan);
+	return __mors_s1g_map->ops->s1g_op_chan_pri_chan_to_5g(s1g_op_chan, s1g_pri_chan);
 }
 EXPORT_SYMBOL(morse_dot11ah_s1g_op_chan_pri_chan_to_5g);
 
@@ -820,133 +1350,33 @@ u32 morse_dot11ah_channel_get_flags(int chan_s1g)
 }
 EXPORT_SYMBOL(morse_dot11ah_channel_get_flags);
 
-int morse_dot11ah_channel_to_freq_khz(int chan)
-{
-	enum morse_dot11ah_region region;
-
-	region = morse_reg_get_region(__mors_s1g_map->alpha);
-
-	switch (region) {
-	case MORSE_AU: {
-		u32 start_freq = 902000;
-		/* AU New Proposal channels 35, 39 and 43 are renumbered to 51, 55 and 59.
-		 * with starting frequency as 894000
-		 */
-		if (chan >= 51 &&
-		    morse_dot11ah_get_channelization_scheme() ==
-		    CHANNELIZATION_SCHEME_IEEE80211_REVMF)
-			start_freq = 894000;
-
-		return (start_freq + chan * 500);
-	}
-	case MORSE_BR:
-	case MORSE_CA:
-	case MORSE_NZ:
-	case MORSE_US:
-		return 902000 + chan * 500;
-	case MORSE_EU:
-	case MORSE_GB:
-		if (chan < 31)
-			return 863000 + chan * 500;
-		else
-			return 901400 + chan * 500;
-	case MORSE_IN:
-		return 863000 + chan * 500;
-	case MORSE_JP:
-		if (chan <= 21) {
-			if (chan & 0x1)
-				return 916500 + chan * 500;
-			else
-				return 922500 + chan * 500;
-		} else {
-			return 906500 + chan * 500;
-		}
-	case MORSE_KR:
-		return 917500 + chan * 500;
-	case MORSE_SG:
-		if (chan < 31)
-			return 863000 + chan * 500;
-		else
-			return 902000 + chan * 500;
-	case REGION_UNSET:
-	default:
-		break;
-	}
-	return 0;
-}
-EXPORT_SYMBOL(morse_dot11ah_channel_to_freq_khz);
-
+/**
+ * morse_dot11ah_freq_khz_bw_mhz_to_chan() - Get the S1G channel number for a frequency/bandwidth
+ * @freq: Frequency, in KHz
+ * @bw: Bandwidth, in MHz
+ *
+ * Channel is resolved via a linear scan of @__mors_s1g_map, the regulatory-domain channel table
+ * selected by the last successful morse_dot11ah_channel_set_map() call. Both the frequency
+ * and bandwith must be correct for a successful conversion.
+ *
+ * Return: S1G channel number, or 0 if no matching channel was found in the active region's table
+ */
 int morse_dot11ah_freq_khz_bw_mhz_to_chan(u32 freq, u8 bw)
 {
-	int channel = 0;
-	enum morse_dot11ah_region region;
+	const struct morse_dot11ah_channel *chan =
+		morse_dot11ah_s1g_freq_to_s1g(KHZ_TO_HZ(freq), bw);
 
-	region = morse_reg_get_region(__mors_s1g_map->alpha);
+	if (chan)
+		return chan->ch.hw_value;
 
-	switch (region) {
-	case MORSE_AU: {
-		u32 start_freq = 902000;
-
-		/* AU New Proposal channels 35, 39 and 43 are renumbered to
-		 * 51, 55 and 59 with starting frequency as 894000.
-		 */
-		if (((freq == 919500 && bw == 4) || (freq == 921500 && bw == 8) ||
-			(freq == 923500 && bw == 4)) &&
-			morse_dot11ah_get_channelization_scheme() ==
-			CHANNELIZATION_SCHEME_IEEE80211_REVMF)
-			start_freq = 894000;
-
-		channel = (freq - start_freq) /  500;
-		break;
-	}
-	case MORSE_BR:
-	case MORSE_CA:
-	case MORSE_NZ:
-	case MORSE_US:
-		channel = (freq - 902000) /  500;
-		break;
-	case MORSE_EU:
-	case MORSE_GB:
-		if (freq > 901400)
-			channel = (freq - 901400) / 500;
-		else
-			channel = (freq - 863000) / 500;
-		break;
-	case MORSE_IN:
-		channel = (freq - 863000) / 500;
-		break;
-	case MORSE_JP:
-		if ((freq % 1000) == 500) {
-			/* We are on a 500kHz centre */
-			if (bw < 4)
-				channel = (freq - 922500) / 500;
-			else
-				channel = (freq - 906500) / 500;
-		} else {
-			channel = (freq - 916500) / 500;
-		}
-		break;
-	case MORSE_KR:
-		channel = (freq - 917500) / 500;
-		break;
-	case MORSE_SG:
-		if (freq > 902000)
-			channel = (freq - 902000) / 500;
-		else
-			channel = (freq - 863000) / 500;
-		break;
-	case REGION_UNSET:
-	default:
-		break;
-	}
-	return channel;
+	return 0;
 }
 EXPORT_SYMBOL(morse_dot11ah_freq_khz_bw_mhz_to_chan);
 
 int morse_dot11ah_prim_1mhz_chan_loc_to_idx(int op_bw_mhz, int pr_bw_mhz, int pr_chan_num,
 					    int chan_centre_freq_num, int chan_loc)
 {
-	return __mors_s1g_map->prim_1mhz_channel_loc_to_idx(op_bw_mhz,
+	return __mors_s1g_map->ops->prim_1mhz_channel_loc_to_idx(op_bw_mhz,
 							    pr_bw_mhz,
 							    pr_chan_num,
 							    chan_centre_freq_num,
@@ -956,7 +1386,7 @@ int morse_dot11ah_prim_1mhz_chan_loc_to_idx(int op_bw_mhz, int pr_bw_mhz, int pr
 int morse_dot11ah_calc_prim_s1g_chan(int op_bw_mhz, int pr_bw_mhz,
 						int chan_centre_freq_num, int pr_1mhz_chan_idx)
 {
-	return __mors_s1g_map->calculate_primary_s1g(op_bw_mhz,
+	return __mors_s1g_map->ops->calculate_primary_s1g(op_bw_mhz,
 						     pr_bw_mhz,
 						     chan_centre_freq_num,
 						     pr_1mhz_chan_idx);
@@ -966,7 +1396,7 @@ EXPORT_SYMBOL(morse_dot11ah_calc_prim_s1g_chan);
 int morse_dot11ah_get_pri_1mhz_chan(int primary_channel,
 	int primary_channel_width_mhz, bool pri_1_mhz_loc_upper)
 {
-	return __mors_s1g_map->get_pri_1mhz_chan(primary_channel,
+	return __mors_s1g_map->ops->get_pri_1mhz_chan(primary_channel,
 					   primary_channel_width_mhz, pri_1_mhz_loc_upper);
 }
 EXPORT_SYMBOL(morse_dot11ah_get_pri_1mhz_chan);

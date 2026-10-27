@@ -496,9 +496,9 @@ void morse_raw_reconfig(struct morse *mors, struct morse_vif *mors_vif);
 /**
  * morse_raw_config_list_delete() - Delete the RAW config list
  *
- * @morse_vif_conf: Pointer to the global morse VIF conf
+ * @mors_vif_conf: Pointer to the global morse VIF conf
  * @vif: mac80211 VIF
  */
-void morse_raw_config_list_delete(void *morse_vif_conf, struct ieee80211_vif *vif);
+void morse_raw_config_list_delete(void *mors_vif_conf, struct ieee80211_vif *vif);
 
 #endif

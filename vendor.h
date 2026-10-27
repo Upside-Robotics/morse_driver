@@ -23,9 +23,9 @@
 static const u8 morse_oui[] = { 0x0C, 0xBF, 0x74 };
 
 /** Operational bits in MM vendor IE */
-#define MORSE_VENDOR_IE_OPS0_DTIM_CTS_TO_SELF   BIT(0)
-#define MORSE_VENDOR_IE_OPS0_LEGACY_AMSDU       BIT(1)
-#define MORSE_VENDOR_IE_OPS0_RATE_CONTROL       GENMASK(3, 2)
+#define MORSE_VENDOR_IE_OPS0_DTIM_CTS_TO_SELF        BIT(0)
+#define MORSE_VENDOR_IE_OPS0_AMSDU_1500_BYTE_LIMIT   BIT(1)
+#define MORSE_VENDOR_IE_OPS0_RATE_CONTROL            GENMASK(3, 2)
 
 /** Capability bits in MM vendor IE */
 #define MORSE_VENDOR_IE_CAP0_MMSS_OFFSET        GENMASK(1, 0)
@@ -37,6 +37,8 @@ static const u8 morse_oui[] = { 0x0C, 0xBF, 0x74 };
  * It expects all the stations in the network to be page slicing capable.
  */
 #define MORSE_VENDOR_IE_CAP0_PAGE_SLICING_EXCLUSIVE_SUPPORT  BIT(4)
+/** Advertise capability to limit A-MSDUs to 1500 bytes */
+#define MORSE_VENDOR_IE_CAP0_AMSDU_1500_BYTE_LIMITING BIT(5)
 
 #define MORSE_VENDOR_IE_CAP0_SET_MMSS_OFFSET(x) ((x) & MORSE_VENDOR_IE_CAP0_MMSS_OFFSET)
 #define MORSE_VENDOR_IE_CAP0_GET_MMSS_OFFSET(x) ((x) & MORSE_VENDOR_IE_CAP0_MMSS_OFFSET)
@@ -124,6 +126,24 @@ void morse_vendor_insert_caps_ops_ie(struct morse *mors, struct ieee80211_vif *v
 void morse_vendor_rx_caps_ops_ie(struct morse_vif *mors_vif,
 				 const struct ieee80211_mgmt *mgmt,
 				 struct dot11ah_ies_mask *ies_mask);
+
+/**
+ * Receive and process our vendor caps ops IE into a given STA object, for
+ * (re)association requests where the station record does not exist in mac80211
+ * yet.
+ *
+ * The caller is expected to save @mors_sta into the STA backups so the info is
+ * restored when mac80211 re-adds the station.
+ *
+ * @mors_vif: pointer to morse interface
+ * @mgmt: pointer to the mgmt frame.
+ * @ies_mask: The ies_mask which points to ies in the frame.
+ * @mors_sta: A pointer to the sta object to fill.
+ */
+void morse_vendor_rx_caps_ops_ie_sta(struct morse_vif *mors_vif,
+				     const struct ieee80211_mgmt *mgmt,
+				     struct dot11ah_ies_mask *ies_mask,
+				     struct morse_sta *mors_sta);
 
 /**
  * Reset any transient info filled via a vendor IE on a STA object.

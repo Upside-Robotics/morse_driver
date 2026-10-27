@@ -1,9 +1,16 @@
 # MM8108 USB support for Fedora bootc
 
-This branch tracks Morse Micro `mm8108-2.1.0` (driver commit
-`4ce0a0272f8ac8e2fa58eea8ff08116e493399de`). It builds USB-only `morse.ko`
-and `dot11ah.ko`, the matching firmware, `morse_cli`, and the suffixed S1G
+This branch tracks Morse Micro `mm8108-2.2.3` (driver commit
+`270da4733cd4dc62e78e897746f98f6dfb3bef80`). It builds USB-only `morse.ko`
+with integrated dot11ah support, 2.2 firmware, `morse_cli`, and the suffixed S1G
 hostap tools. It does not replace the Fedora kernel or normal Wi-Fi binaries.
+
+Driver, CLI, and hostap use the latest available MM8108 2.2.x tags, currently
+`mm8108-2.2.3`. Firmware uses commit `1b15599cbbe891de4f27952bc7a24cb5bcf09c52`
+("Firmware binaries for 2.2 releases"); upstream has not tagged that firmware
+`mm8108-2.2.3`. No component follows a floating branch at image-build time.
+The rate-control submodule has an absolute upstream URL so clean fork clones
+work without an organization-local rate-control fork.
 
 ## Review of the previous port
 
@@ -18,10 +25,14 @@ old patches again. In particular, retain upstream's GPIO implementation rather
 than the old patch that disabled device-tree support on newer kernels.
 
 The remaining local Kbuild fix prevents an empty `KERNEL_SRC` from emitting
-a bare `-I` and swallowing the next compiler flag. Both USB modules build
+a bare `-I` and swallowing the next compiler flag. The USB module builds
 against the reference 7.2 kernel. Unlike the old Debian builder, this builder
 does not build a custom kernel, apply PREEMPT_RT, disable kernel signing, or
 apply SDIO vendor-ID patches. Those are not required for USB.
+
+The 2.2.3 source integrates dot11ah into `morse.ko`; do not require or install
+a separate `dot11ah.ko`. The tagged source's stale MM6108 version label is
+corrected locally to `0-rel_mm8108_2_2_3` so module metadata identifies the release.
 
 Userspace retains the old narrow hostap unused-variable fix and OpenSSL
 deprecation handling. GCC 16 defaults to C23, whose type-generic `strchr`
@@ -95,15 +106,16 @@ the artifacts. The builder does not weaken Secure Boot or kernel policy.
 Rebuild the modules whenever the base image's kernel changes.
 
 After booting an image, verify `lsusb -d 325b:8100`,
-`modinfo morse`, `modinfo dot11ah`, `journalctl -k`, `iw phy`, and
+`modinfo morse`, `journalctl -k`, `iw phy`, and
 `morse_cli -i <interface> version` before testing association and mesh peering.
 Compilation alone does not establish hardware or radio interoperability.
 
 ## Validation
 
-The full artifact container build has passed on the pinned Fedora 44 amd64
+The full 2.2.3 artifact container build has passed on the pinned Fedora 44 amd64
 base, kernel `7.2.12-200.fc44.x86_64`, with GCC 16. The modules and complete
-stack also build against the reference local 7.2 kernel. CI builds the same
+stack were previously built against the reference local 7.2 kernel; the 2.2.3
+module has also been compiled and its version verified there. CI builds the same
 artifact Containerfile on native amd64 and ARM64 runners; a configured CI job
 is not evidence that the ARM64 run has passed. Hardware association, mesh
 peering, and Secure Boot signing require separate deployment validation.

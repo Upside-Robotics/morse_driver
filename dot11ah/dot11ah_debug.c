@@ -7,7 +7,7 @@
 
 #include <linux/device.h>
 
-#include "debug.h"
+#include "dot11ah_debug.h"
 #include "dot11ah.h"
 
 u32 dot11ah_debug_mask;

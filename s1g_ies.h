@@ -2,11 +2,13 @@
 #define _MORSE_S1G_IES_H_
 
 /*
- * Copyright 2017-2022 Morse Micro
+ * Copyright 2017-2026 Morse Micro
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
  */
+#include <linux/bitfield.h>
+
 #if KERNEL_VERSION(5, 10, 0) > MAC80211_VERSION_CODE
 #define S1G_CAP0_S1G_LONG			BIT(0)
 #define S1G_CAP0_SGI_1MHZ			BIT(1)
@@ -103,7 +105,7 @@
 
 /* Octet 3 */
 /**
- * 802.11me Table 9-300 (Subfields of the S1G Capabilities Information field).
+ * IEEE 802.11-2024 Table 9-351 (Subfields of the S1G Capabilities Information field).
  *
  * - Set to 0 if RX of travelling pilots is not supported
  * - Set to 1 if RX of 1NSS travelling pilots is supported with STBC
@@ -165,5 +167,14 @@ enum trav_pilot_support {
 
 #define NL80211_S1G_NSS_MAX			(4)
 #define S1G_CAP_BITS_PER_MCS_NSS		(2)
+
+/* Supported S1G-MCS and NSS Set field (IEEE 802.11-2024 9.4.2.199.3) */
+#define S1G_MCS_NSS_RX_LGI_HIGH	BIT(0)
+#define S1G_MCS_NSS_TX_MAP_LOW	GENMASK(7, 1)
+#define S1G_MCS_NSS_TX_MAP_HIGH	BIT(0)
+#define S1G_MCS_NSS_TX_LGI_LOW	GENMASK(7, 1)
+#define S1G_MCS_NSS_TX_LGI_HIGH	GENMASK(1, 0)
+#define S1G_MCS_NSS_RX_1MHZ_MAP	GENMASK(3, 2)
+#define S1G_MCS_NSS_TX_1MHZ_MAP	GENMASK(5, 4)
 
 #endif /* !_MORSE_S1G_IES_H_ */

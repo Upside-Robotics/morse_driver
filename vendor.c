@@ -233,13 +233,7 @@ void morse_vendor_insert_caps_ops_ie(struct morse *mors,
 {
 	struct morse_vif *mors_vif = ieee80211_vif_to_morse_vif(vif);
 	struct dot11_morse_vendor_caps_ops_ie ie_data = { 0 };
-	struct morse_sta *mors_sta = NULL;
-	struct ieee80211_sta *sta = NULL;
 	struct ieee80211_mgmt *mgmt = (struct ieee80211_mgmt *)skb->data;
-	bool is_assoc_reassoc_req = (ieee80211_is_assoc_req(mgmt->frame_control) ||
-				     ieee80211_is_reassoc_req(mgmt->frame_control));
-	bool is_assoc_reassoc_resp = (ieee80211_is_assoc_resp(mgmt->frame_control) ||
-				      ieee80211_is_reassoc_resp(mgmt->frame_control));
 
 	if (!ies_mask || !enable_mm_vendor_ie)
 		return;
@@ -270,38 +264,16 @@ void morse_vendor_insert_caps_ops_ie(struct morse *mors,
 
 	ie_data.ops0 |= BMSET(mors->rc_method, MORSE_VENDOR_IE_OPS0_RATE_CONTROL);
 
+	if (mors_vif->capabilities.amsdu_1500_byte_limiting)
+		ie_data.cap0 |= MORSE_VENDOR_IE_CAP0_AMSDU_1500_BYTE_LIMITING;
+
+	if (MORSE_OPS_IN_USE(&mors_vif->operations, AMSDU_1500_BYTE_LIMIT))
+		ie_data.ops0 |= MORSE_VENDOR_IE_OPS0_AMSDU_1500_BYTE_LIMIT;
+
 	if (vif->type == NL80211_IFTYPE_AP) {
 		/* Always indicate usage of DTIM CTS-to-self */
 		if (MORSE_OPS_IN_USE(&mors_vif->operations, DTIM_CTS_TO_SELF))
 			ie_data.ops0 |= MORSE_VENDOR_IE_OPS0_DTIM_CTS_TO_SELF;
-
-		/* See if we need to negotiate LEGACY AMSDU for sta */
-		if (is_assoc_reassoc_resp) {
-			/* Must be held while finding and dereferencing sta */
-			rcu_read_lock();
-			sta = ieee80211_find_sta(vif, mgmt->da);
-			if (sta)
-				mors_sta = (struct morse_sta *)sta->drv_priv;
-
-			if (mors_sta && mors_sta->vendor_info.valid) {
-				/* STA has previously indicated that it would like AMSDU */
-				if (MORSE_OPS_IN_USE(&mors_sta->vendor_info.operations,
-						     LEGACY_AMSDU)) {
-					if (mors->custom_configs.enable_legacy_amsdu)
-						ie_data.ops0 |= MORSE_VENDOR_IE_OPS0_LEGACY_AMSDU;
-					else
-						MORSE_OPS_CLEAR(&mors_sta->vendor_info.operations,
-								LEGACY_AMSDU);
-				}
-			}
-			rcu_read_unlock();
-		}
-	} else if (vif->type == NL80211_IFTYPE_STATION) {
-		if (is_assoc_reassoc_req) {
-			/* Attempt to negotiate Legacy AMSDU */
-			if (mors->custom_configs.enable_legacy_amsdu)
-				ie_data.ops0 |= MORSE_VENDOR_IE_OPS0_LEGACY_AMSDU;
-		}
 	}
 
 	put_vendor_ie(&ie_data, ies_mask);
@@ -334,8 +306,6 @@ morse_vendor_find_vendor_ie(struct dot11ah_ies_mask *ies_mask)
 void morse_vendor_fill_sta_vendor_info(struct morse_vif *mors_vif,
 				       struct dot11_morse_vendor_caps_ops_ie *ie)
 {
-	struct morse *mors = morse_vif_to_morse(mors_vif);
-
 	memset(&mors_vif->bss_vendor_info, 0, sizeof(mors_vif->bss_vendor_info));
 	mors_vif->bss_vendor_info.valid = true;
 	mors_vif->bss_vendor_info.chip_id = ie->hw_ver;
@@ -350,25 +320,55 @@ void morse_vendor_fill_sta_vendor_info(struct morse_vif *mors_vif,
 	if (ie->ops0 & MORSE_VENDOR_IE_OPS0_DTIM_CTS_TO_SELF)
 		MORSE_OPS_SET(&mors_vif->bss_vendor_info.operations, DTIM_CTS_TO_SELF);
 
+	if (ie->ops0 & MORSE_VENDOR_IE_OPS0_AMSDU_1500_BYTE_LIMIT)
+		MORSE_OPS_SET(&mors_vif->bss_vendor_info.operations, AMSDU_1500_BYTE_LIMIT);
+	else
+		MORSE_OPS_CLEAR(&mors_vif->bss_vendor_info.operations, AMSDU_1500_BYTE_LIMIT);
+
 	mors_vif->bss_vendor_info.supports_short_ack_timeout =
 	    (ie->cap0 & MORSE_VENDOR_IE_CAP0_SHORT_ACK_TIMEOUT);
 
 	mors_vif->bss_vendor_info.pv1_data_frame_only_support =
 		(ie->cap0 & MORSE_VENDOR_IE_CAP0_PV1_DATA_FRAME_SUPPORT);
 
+	mors_vif->bss_vendor_info.supports_amsdu_1500_byte_limiting =
+		(ie->cap0 & MORSE_VENDOR_IE_CAP0_AMSDU_1500_BYTE_LIMITING);
+
 	/* Enable Page slicing capability if chip supports it */
 	if (mors_vif->page_slicing_info.enabled)
 		mors_vif->bss_vendor_info.page_slicing_exclusive_support =
 			(ie->cap0 & MORSE_VENDOR_IE_CAP0_PAGE_SLICING_EXCLUSIVE_SUPPORT);
+}
 
-	if ((ie->ops0 & MORSE_VENDOR_IE_OPS0_LEGACY_AMSDU) &&
-	    mors->custom_configs.enable_legacy_amsdu) {
-		/* AP agreed to our request for LEGACY AMSDU */
-		MORSE_OPS_SET(&mors_vif->operations, LEGACY_AMSDU);
-		MORSE_OPS_SET(&mors_vif->bss_vendor_info.operations, LEGACY_AMSDU);
-	} else {
-		MORSE_OPS_CLEAR(&mors_vif->operations, LEGACY_AMSDU);
-	}
+static void morse_vendor_fill_peer_vendor_info(struct morse_sta *mors_sta,
+					       const struct dot11_morse_vendor_caps_ops_ie *ie)
+{
+	memset(&mors_sta->vendor_info, 0, sizeof(mors_sta->vendor_info));
+	mors_sta->vendor_info.valid = true;
+	mors_sta->vendor_info.chip_id = ie->hw_ver;
+	mors_sta->vendor_info.sw_ver.major = ie->sw_ver.major;
+	mors_sta->vendor_info.sw_ver.minor = ie->sw_ver.minor;
+	mors_sta->vendor_info.sw_ver.patch = ie->sw_ver.patch;
+	mors_sta->vendor_info.morse_mmss_offset =
+		MORSE_VENDOR_IE_CAP0_GET_MMSS_OFFSET(ie->cap0);
+	mors_sta->vendor_info.rc_method = BMGET(ie->ops0,
+						MORSE_VENDOR_IE_OPS0_RATE_CONTROL);
+
+	if (ie->ops0 & MORSE_VENDOR_IE_OPS0_AMSDU_1500_BYTE_LIMIT)
+		MORSE_OPS_SET(&mors_sta->vendor_info.operations,
+			      AMSDU_1500_BYTE_LIMIT);
+	else
+		MORSE_OPS_CLEAR(&mors_sta->vendor_info.operations,
+				AMSDU_1500_BYTE_LIMIT);
+
+	mors_sta->vendor_info.supports_short_ack_timeout =
+	    (ie->cap0 & MORSE_VENDOR_IE_CAP0_SHORT_ACK_TIMEOUT);
+
+	mors_sta->vendor_info.pv1_data_frame_only_support =
+		(ie->cap0 & MORSE_VENDOR_IE_CAP0_PV1_DATA_FRAME_SUPPORT);
+
+	mors_sta->vendor_info.supports_amsdu_1500_byte_limiting =
+		(ie->cap0 & MORSE_VENDOR_IE_CAP0_AMSDU_1500_BYTE_LIMITING);
 }
 
 void morse_vendor_rx_caps_ops_ie(struct morse_vif *mors_vif,
@@ -376,9 +376,7 @@ void morse_vendor_rx_caps_ops_ie(struct morse_vif *mors_vif,
 				 struct dot11ah_ies_mask *ies_mask)
 {
 	struct ieee80211_vif *vif = morse_vif_to_ieee80211_vif(mors_vif);
-	struct morse *mors = morse_vif_to_morse(mors_vif);
 	struct dot11_morse_vendor_caps_ops_ie *ie = NULL;
-	struct morse_sta *mors_sta = NULL;
 	struct ieee80211_sta *sta = NULL;
 	bool is_assoc_reassoc_req = (ieee80211_is_assoc_req(mgmt->frame_control) ||
 				     ieee80211_is_reassoc_req(mgmt->frame_control));
@@ -387,7 +385,6 @@ void morse_vendor_rx_caps_ops_ie(struct morse_vif *mors_vif,
 	bool is_mesh_open_frame = morse_dot11_is_mpm_open_frame(mgmt);
 
 	ie = morse_vendor_find_vendor_ie(ies_mask);
-
 	if (!ie)
 		return;
 
@@ -399,37 +396,35 @@ void morse_vendor_rx_caps_ops_ie(struct morse_vif *mors_vif,
 		/* Must be held while finding and dereferencing sta */
 		rcu_read_lock();
 		sta = ieee80211_find_sta(vif, mgmt->sa);
-		if (sta) {
-			mors_sta = (struct morse_sta *)sta->drv_priv;
-			memset(&mors_sta->vendor_info, 0, sizeof(mors_sta->vendor_info));
-
-			/* Unconditionally fill version information */
-			mors_sta->vendor_info.valid = true;
-			mors_sta->vendor_info.chip_id = ie->hw_ver;
-			mors_sta->vendor_info.sw_ver.major = ie->sw_ver.major;
-			mors_sta->vendor_info.sw_ver.minor = ie->sw_ver.minor;
-			mors_sta->vendor_info.sw_ver.patch = ie->sw_ver.patch;
-			mors_sta->vendor_info.morse_mmss_offset =
-				MORSE_VENDOR_IE_CAP0_GET_MMSS_OFFSET(ie->cap0);
-			mors_sta->vendor_info.rc_method = BMGET(ie->ops0,
-								MORSE_VENDOR_IE_OPS0_RATE_CONTROL);
-
-			if ((ie->ops0 & MORSE_VENDOR_IE_OPS0_LEGACY_AMSDU) &&
-			    mors->custom_configs.enable_legacy_amsdu)
-				MORSE_OPS_SET(&mors_sta->vendor_info.operations, LEGACY_AMSDU);
-			else
-				MORSE_OPS_CLEAR(&mors_sta->vendor_info.operations, LEGACY_AMSDU);
-
-			mors_sta->vendor_info.supports_short_ack_timeout =
-			    (ie->cap0 & MORSE_VENDOR_IE_CAP0_SHORT_ACK_TIMEOUT);
-
-			mors_sta->vendor_info.pv1_data_frame_only_support =
-				(ie->cap0 & MORSE_VENDOR_IE_CAP0_PV1_DATA_FRAME_SUPPORT);
-		}
+		if (sta)
+			morse_vendor_fill_peer_vendor_info((struct morse_sta *)sta->drv_priv, ie);
 		rcu_read_unlock();
 	} else if (vif->type == NL80211_IFTYPE_STATION && is_assoc_reassoc_resp) {
 		morse_vendor_fill_sta_vendor_info(mors_vif, ie);
 	}
+}
+
+void morse_vendor_rx_caps_ops_ie_sta(struct morse_vif *mors_vif,
+				     const struct ieee80211_mgmt *mgmt,
+				     struct dot11ah_ies_mask *ies_mask,
+				     struct morse_sta *mors_sta)
+{
+	struct ieee80211_vif *vif = morse_vif_to_ieee80211_vif(mors_vif);
+	struct dot11_morse_vendor_caps_ops_ie *ie = NULL;
+	bool is_assoc_reassoc_req = (ieee80211_is_assoc_req(mgmt->frame_control) ||
+				     ieee80211_is_reassoc_req(mgmt->frame_control));
+
+	if (!(vif->type == NL80211_IFTYPE_AP && is_assoc_reassoc_req))
+		return;
+
+	ie = morse_vendor_find_vendor_ie(ies_mask);
+	if (!ie)
+		return;
+
+	if (!is_morse_vendor_caps_ops_ie_allowed(vif, mgmt))
+		return;
+
+	morse_vendor_fill_peer_vendor_info(mors_sta, ie);
 }
 
 void morse_vendor_reset_sta_transient_info(struct ieee80211_vif *vif, struct morse_sta *mors_sta)
@@ -438,8 +433,17 @@ void morse_vendor_reset_sta_transient_info(struct ieee80211_vif *vif, struct mor
 
 	memset(&mors_sta->vendor_info, 0, sizeof(mors_sta->vendor_info));
 	if (vif->type == NL80211_IFTYPE_STATION) {
+		struct morse *mors = morse_vif_to_morse(mors_vif);
+
 		memset(&mors_vif->operations, 0, sizeof(mors_vif->operations));
 		memset(&mors_vif->bss_vendor_info, 0, sizeof(mors_vif->bss_vendor_info));
+
+		/* The following is unconditionally signalled and does not require
+		 * negotiation. It is only relevant when A-MSDU is negotiated in an
+		 * AddBA.
+		 */
+		if (mors->cfg->amsdu.has_1500_byte_limit)
+			MORSE_OPS_SET(&mors_vif->operations, AMSDU_1500_BYTE_LIMIT);
 	}
 }
 

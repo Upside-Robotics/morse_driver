@@ -69,6 +69,18 @@ MODULE_PARM_DESC(default_cmd_timeout_ms, "Default command timeout (in ms)");
 /* Enable additional probe request on beacons indicating a dozing AP */
 static const bool enable_probe_on_doze_beacon = true;
 
+static u32 morse_cmd_timeout_ms(u32 requested_timeout_ms, u32 minimum_timeout_ms)
+{
+	u32 timeout_ms = requested_timeout_ms ? requested_timeout_ms : default_cmd_timeout_ms;
+
+	return max(timeout_ms, minimum_timeout_ms);
+}
+
+static bool morse_cmd_should_retry(int ret, unsigned int attempts)
+{
+	return ret == -ETIMEDOUT && attempts < MM_MAX_COMMAND_RETRY;
+}
+
 static void morse_cmd_init(struct morse *mors, struct morse_cmd_header *hdr,
 			   enum morse_cmd_id cmd, u16 vif_id, u16 len)
 {
@@ -114,6 +126,7 @@ static const char *morse_cmd_standby_exit_reason_to_str(enum
 	}
 }
 
+
 /**
  * morse_cmd_tx() - Send a command to the chip and wait for its response.
  * @mors: Global driver structure.
@@ -137,12 +150,15 @@ static int morse_cmd_tx(struct morse *mors, struct morse_cmd_resp *resp,
 	int retry = 0;
 	unsigned long wait_ret = 0;
 	struct sk_buff *skb;
-	struct morse_skbq *cmd_q = mors->cfg->ops->skbq_cmd_tc_q(mors);
+	struct morse_skbq *cmd_q;
 	struct morse_cmd_resp_cb *resp_cb;
 	DECLARE_COMPLETION_ONSTACK(cmd_comp);
 
+
 	BUILD_BUG_ON(sizeof(struct morse_cmd_resp_cb) > IEEE80211_TX_INFO_DRIVER_DATA_SIZE);
 
+
+	cmd_q = mors->cfg->ops->skbq_cmd_tc_q(mors);
 	if (!cmd_q)
 		/* No control pageset, not supported by FW */
 		return -ENODEV;
@@ -170,8 +186,13 @@ static int morse_cmd_tx(struct morse *mors, struct morse_cmd_resp *resp,
 	host_id = mors->cmd_seq << MORSE_CMD_HOST_ID_SEQ_SHIFT;
 
 	do {
+		/* Flush CMD requests that have not yet made it to the HW (i.e.
+		 * were left over from a previous attempt). Flush only the
+		 * outgoing request queue - command responses and events share
+		 * the RX command queue and must not be discarded here.
+		 */
+		morse_skbq_tx_flush(cmd_q);
 		req->hdr.host_id = cpu_to_le16(host_id | retry);
-
 		skb = morse_skbq_alloc_skb(cmd_q, cmd_len);
 		if (!skb) {
 			ret = -ENOMEM;
@@ -191,8 +212,7 @@ static int morse_cmd_tx(struct morse *mors, struct morse_cmd_resp *resp,
 		mors->cmd_comp = &cmd_comp;
 		if (retry > 0)
 			reinit_completion(&cmd_comp);
-		timeout = timeout ? timeout : default_cmd_timeout_ms;
-		morse_skbq_set_mac80211_owned(skb, false);
+		timeout = morse_cmd_timeout_ms(timeout, 0);
 		ret = morse_skbq_skb_tx(cmd_q, &skb, NULL, MORSE_SKB_CHAN_COMMAND);
 		mutex_unlock(&mors->cmd_lock);
 
@@ -228,7 +248,7 @@ static int morse_cmd_tx(struct morse *mors, struct morse_cmd_resp *resp,
 		mutex_unlock(&mors->cmd_lock);
 
 		retry++;
-	} while ((ret == -ETIMEDOUT) && retry < MM_MAX_COMMAND_RETRY);
+	} while (morse_cmd_should_retry(ret, retry));
 	mutex_unlock(&mors->cmd_wait);
 
 	morse_ps_wakers_dec(mors);
@@ -832,8 +852,7 @@ int morse_cmd_set_ps(struct morse *mors, u16 vif_id, bool enabled, bool enable_d
 	req.dynamic_ps_offload = (u8)enable_dynamic_ps_offload;
 
 	ret = morse_cmd_tx(mors, NULL, (struct morse_cmd_req *)&req, 0,
-			   default_cmd_timeout_ms > MM_CMD_POWERSAVE_TIMEOUT_MS ?
-			   default_cmd_timeout_ms : MM_CMD_POWERSAVE_TIMEOUT_MS, __func__);
+			   morse_cmd_timeout_ms(0, MM_CMD_POWERSAVE_TIMEOUT_MS), __func__);
 
 	return ret;
 }
@@ -2197,8 +2216,7 @@ int morse_cmd_health_check(struct morse *mors)
 	morse_cmd_init(mors, &req.hdr, MORSE_CMD_ID_HEALTH_CHECK, 0, sizeof(req));
 
 	ret = morse_cmd_tx(mors, NULL, (struct morse_cmd_req *)&req, 0,
-			   default_cmd_timeout_ms > MM_CMD_HEALTH_CHECK_TIMEOUT_MS ?
-			   default_cmd_timeout_ms : MM_CMD_HEALTH_CHECK_TIMEOUT_MS, __func__);
+			   morse_cmd_timeout_ms(0, MM_CMD_HEALTH_CHECK_TIMEOUT_MS), __func__);
 
 	return ret;
 }
@@ -2322,6 +2340,8 @@ static int morse_cmd_twt_agreement_req(struct morse *mors,
 	enum morse_cmd_id message_id;
 
 	req = kmalloc(sizeof(*req) + MORSE_CMD_DOT11_TWT_AGREEMENT_MAX_LEN, GFP_KERNEL);
+	if (!req)
+		return -ENOMEM;
 
 	if (validate_only)
 		message_id = MORSE_CMD_ID_TWT_AGREEMENT_VALIDATE;
@@ -2435,7 +2455,11 @@ int morse_cmd_set_mpsw(struct morse *mors, int min, int max, int window)
 	req.config.airtime_max_us = cpu_to_le32(max);
 	req.config.airtime_min_us = cpu_to_le32(min);
 	req.config.packet_space_window_length_us = cpu_to_le32(window);
-	req.config.enable = (max > 0 && min > 0);
+	/* Enable for both bounds set, or max-only with no window (JP850);
+	 * max+window with no min (KR) stays disabled.
+	 */
+	req.config.enable = (max > 0) && (min > 0 || window == 0);
+
 	req.set_cfgs = MORSE_CMD_SET_MPSW_CFG_AIRTIME_BOUNDS |
 	    MORSE_CMD_SET_MPSW_CFG_PKT_SPC_WIN_LEN | MORSE_CMD_SET_MPSW_CFG_ENABLED;
 
@@ -2964,6 +2988,9 @@ int morse_cmd_start_scan(struct morse *mors,
 	size_t max_ies_size = sizeof(req->extra_ies[0]) * MORSE_CMD_SCAN_EXTRA_IES_MAX_LEN;
 	size_t req_size = sizeof(*req) + max_ies_size;
 
+	if (n_ssids > SCAN_MAX_SSIDS || (ssid_len && !ssid) || (extra_ies_len && !extra_ies))
+		return -EINVAL;
+
 	req = kzalloc(req_size, GFP_KERNEL);
 	if (!req)
 		return -ENOMEM;
@@ -3121,22 +3148,53 @@ exit:
 	return ret;
 }
 
+/**
+ * morse_cmd_apf_buffer_lengths() - Compute the buffer sizes for an APF read/write command.
+ *
+ * @write: True for a write (the program extends the request), false for a read (the response).
+ * @program_len: Length of the APF (Android Packet Filter) program in bytes.
+ * @req_len: Output for the word-aligned request buffer length.
+ * @resp_len: Output for the word-aligned response buffer length.
+ *
+ * Return: 0 on success, or -EMSGSIZE if a length exceeds the u16 command length field.
+ */
+static int morse_cmd_apf_buffer_lengths(bool write, u16 program_len,
+					u16 *req_len, u16 *resp_len)
+{
+	size_t request_len = sizeof(struct morse_cmd_req_read_write_apf);
+	size_t response_len = sizeof(struct morse_cmd_resp_read_write_apf);
+
+	if (write)
+		request_len += program_len;
+	else
+		response_len += program_len;
+
+	request_len = ROUND_BYTES_TO_WORD(request_len);
+	response_len = ROUND_BYTES_TO_WORD(response_len);
+	if (request_len > U16_MAX || response_len > U16_MAX)
+		return -EMSGSIZE;
+
+	*req_len = request_len;
+	*resp_len = response_len;
+
+	return 0;
+}
+
 int morse_cmd_read_write_apf(struct morse *mors, struct morse_vif *mors_vif, bool write,
 			      u16 program_len, u8 *program, u32 offset)
 {
 	struct morse_cmd_req_read_write_apf *req;
 	struct morse_cmd_resp_read_write_apf *resp;
 	int ret;
-	u16 req_len = sizeof(*req);
-	u16 resp_len = sizeof(*resp);
+	u16 req_len;
+	u16 resp_len;
 
-	if (write)
-		req_len += program_len;
-	else
-		resp_len += program_len;
+	if (program_len && !program)
+		return -EINVAL;
 
-	req_len = ROUND_BYTES_TO_WORD(req_len);
-	resp_len = ROUND_BYTES_TO_WORD(resp_len);
+	ret = morse_cmd_apf_buffer_lengths(write, program_len, &req_len, &resp_len);
+	if (ret)
+		return ret;
 
 	req = kzalloc(req_len, GFP_KERNEL);
 	if (!req)
@@ -3241,5 +3299,24 @@ exit:
 	kfree_skb(skb);
 	kfree(req);
 	kfree(resp);
+	return ret;
+}
+
+int morse_cmd_set_ampdu_feedback(struct morse *mors, bool enable)
+{
+	struct morse_cmd_req_get_set_generic_param req;
+	int ret;
+
+	morse_cmd_init(mors, &req.hdr, MORSE_CMD_ID_GET_SET_GENERIC_PARAM, 0, sizeof(req));
+	req.param_id = cpu_to_le32(MORSE_CMD_PARAM_ID_AMPDU_FEEDBACK);
+	req.action = cpu_to_le32(MORSE_CMD_PARAM_ACTION_SET);
+	req.flags = 0;
+	req.value = cpu_to_le32(enable ? 1 : 0);
+
+	ret = morse_cmd_tx(mors, NULL, (struct morse_cmd_req *)&req, 0, 0, __func__);
+
+	mors->enable_individual_agg_stats = (ret == 0 && enable);
+	MORSE_DBG(mors, "%s: aggregate feedback reporting %s\n", __func__,
+		   (ret == 0 && enable) ? "enabled" : "disabled");
 	return ret;
 }

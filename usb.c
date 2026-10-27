@@ -871,7 +871,7 @@ static int morse_usb_probe(struct usb_interface *interface, const struct usb_dev
 	MORSE_USB_INFO(mors, "Board serial: %s", mors->board_serial);
 
 	mutex_lock(&mors->lock);
-	ret = morse_firmware_prepare(mors, reset_hw, morse_hw_should_reattach());
+		ret = morse_firmware_prepare(mors, reset_hw, morse_hw_should_reattach());
 	if (!ret || ret == -EALREADY)
 		morse_hw_set_state(mors, MORSE_HW_STATE_ON);
 	mutex_unlock(&mors->lock);
@@ -921,15 +921,15 @@ static int morse_usb_probe(struct usb_interface *interface, const struct usb_dev
 	}
 
 	if (!morse_test_mode_enabled(test_mode)) {
-		ret = morse_mac_health_check_init(mors);
+		ret = morse_watchdog_init(mors);
 		if (ret) {
-			MORSE_USB_ERR(mors, "mmorse_mac_health_check_init failed %d\n", ret);
+			MORSE_USB_ERR(mors, "mmorse_watchdog_health_check_init failed %d\n", ret);
 			goto err_mac;
 		}
 		health_check_init_done = true;
 
 		if (attach) {
-			u32 attach_cfg =  morse_mac_get_attach_config();
+			u32 attach_cfg =  morse_hw_get_attach_config();
 
 			ret = morse_hw_attach(mors, attach_cfg);
 			if (ret) {
@@ -1013,7 +1013,7 @@ err_net_wq:
 	}
 err_ep:
 	if (health_check_init_done)
-		morse_mac_health_check_finish(mors);
+		morse_watchdog_health_check_finish(mors);
 	if (sysfs_init)
 		morse_sysfs_finish(mors);
 	morse_mac_destroy(mors);
@@ -1173,7 +1173,7 @@ static void morse_usb_disconnect(struct usb_interface *interface)
 #endif
 
 	if (!morse_test_mode_enabled(test_mode)) {
-		morse_mac_health_check_finish(mors);
+		morse_watchdog_health_check_finish(mors);
 		morse_mac_unregister(mors);
 		morse_usb_int_stop(mors);
 		mors->cfg->ops->finish(mors);

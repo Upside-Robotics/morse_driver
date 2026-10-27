@@ -151,32 +151,28 @@
 #define MM6108A2_ID MORSE_DEVICE_ID(MM6108XX_ID, 4, CHIP_TYPE_SILICON)
 
 /* Chip Id */
-#define MM8108XX_ID 0x9
+#define MM81XX_ID 0x9
 
 /* Chip Rev */
 #define MM8108B0_REV 0x6
 #define MM8108B1_REV 0x7
 #define MM8108B2_REV 0x8
-#define MM8108B3_REV 0x9
 
 /* Chip Rev String */
-#define MM8108B_STRING "b"
-#define MM8108B0_REV_STRING MM8108B_STRING "0"
-#define MM8108B1_REV_STRING MM8108B_STRING "1"
-#define MM8108B2_REV_STRING MM8108B_STRING "2"
-#define MM8108B3_REV_STRING MM8108B_STRING "3"
+#define MM81XXB_STRING "b"
+#define MM8108B0_REV_STRING MM81XXB_STRING "0"
+#define MM8108B1_REV_STRING MM81XXB_STRING "1"
+#define MM8108B2_REV_STRING MM81XXB_STRING "2"
 
-/* Chip ID for MM8108 */
-#define MM8108B0_ID MORSE_DEVICE_ID(MM8108XX_ID, MM8108B0_REV, CHIP_TYPE_SILICON)
-#define MM8108B1_ID MORSE_DEVICE_ID(MM8108XX_ID, MM8108B1_REV, CHIP_TYPE_SILICON)
-#define MM8108B2_ID MORSE_DEVICE_ID(MM8108XX_ID, MM8108B2_REV, CHIP_TYPE_SILICON)
-#define MM8108B3_ID MORSE_DEVICE_ID(MM8108XX_ID, MM8108B3_REV, CHIP_TYPE_SILICON)
+/* Chip ID for MM81XX */
+#define MM8108B0_ID MORSE_DEVICE_ID(MM81XX_ID, MM8108B0_REV, CHIP_TYPE_SILICON)
+#define MM8108B1_ID MORSE_DEVICE_ID(MM81XX_ID, MM8108B1_REV, CHIP_TYPE_SILICON)
+#define MM8108B2_ID MORSE_DEVICE_ID(MM81XX_ID, MM8108B2_REV, CHIP_TYPE_SILICON)
 
-/* Chip ID for MM8108 - FPGA */
-#define MM8108B0_FPGA_ID MORSE_DEVICE_ID(MM8108XX_ID, MM8108B0_REV, CHIP_TYPE_FPGA)
-#define MM8108B1_FPGA_ID MORSE_DEVICE_ID(MM8108XX_ID, MM8108B1_REV, CHIP_TYPE_FPGA)
-#define MM8108B2_FPGA_ID MORSE_DEVICE_ID(MM8108XX_ID, MM8108B2_REV, CHIP_TYPE_FPGA)
-#define MM8108B3_FPGA_ID MORSE_DEVICE_ID(MM8108XX_ID, MM8108B3_REV, CHIP_TYPE_FPGA)
+/* Chip ID for MM81XX - FPGA */
+#define MM8108B0_FPGA_ID MORSE_DEVICE_ID(MM81XX_ID, MM8108B0_REV, CHIP_TYPE_FPGA)
+#define MM8108B1_FPGA_ID MORSE_DEVICE_ID(MM81XX_ID, MM8108B1_REV, CHIP_TYPE_FPGA)
+#define MM8108B2_FPGA_ID MORSE_DEVICE_ID(MM81XX_ID, MM8108B2_REV, CHIP_TYPE_FPGA)
 
 
 #define MEM_ACCESS_FIXED_REGION_COUNT	2
@@ -511,10 +507,20 @@ struct morse_hw_cfg {
 	 */
 	bool enable_short_bcn_as_dtim;
 
+	struct {
+		/** @amsdu: When true, device supports A-MSDU transmit and reception. */
+		bool enabled;
+		/**
+		 * @has_amsdu_1500_byte_limit: When true, device is limited to sending and receiving
+		 * 1500 byte (ETH_DATA_LEN) A-MSDUs.
+		 */
+		bool has_1500_byte_limit;
+	} amsdu;
+
 	/**
-	 * @enable_amsdu_support: Indicate if A-MSDU to be enabled when airtime fairness is enabled
+	 * @ampdu_feedback_enabled: Indicated if AMPDU feedback is enabled
 	 */
-	bool enable_amsdu_support;
+	bool ampdu_feedback_enabled;
 
 	/** Host GPIO config */
 	struct morse_gpios gpios;
@@ -522,6 +528,13 @@ struct morse_hw_cfg {
 	u32 board_type_max_value;
 	u32 fw_count;
 	u32 host_table_ptr;
+
+	/* HW specific info required for coredump */
+	struct {
+		const struct morse_coredump_mem_region *regions;
+		size_t regions_num;
+		size_t regions_total_len;
+	} coredump;
 };
 
 struct morse_chip_series {
@@ -558,9 +571,9 @@ enum sdio_burst_mode {
 /* MM6108 */
 extern struct morse_chip_series mm61xx_chip_series;
 extern struct morse_hw_cfg mm6108_cfg;
-/* MM8108 */
+/* MM81XX */
 extern struct morse_chip_series mm81xx_chip_series;
-extern struct morse_hw_cfg mm8108_cfg;
+extern struct morse_hw_cfg mm81xx_cfg;
 
 /**
  * morse_hw_reset - performs a hardware reset on the chip by toggling
@@ -713,6 +726,13 @@ bool morse_hw_should_reattach(void);
 bool morse_hw_can_detach(const struct morse *mors);
 
 /**
+ * morse_hw_get_attach_config() - Get suitable attach configuration.
+ *
+ * @return enum morse_cmd_headless_cfg_option
+ */
+int morse_hw_get_attach_config(void);
+
+/**
  * morse_hw_headless_init - Initialise headless data structure in mors struct
  *
  * @mors: morse struct
@@ -803,5 +823,28 @@ static inline bool morse_hw_ps_gpios_are_supported(struct morse_gpios *gpios)
 {
 	return gpio_is_valid(gpios->wake) && gpio_is_valid(gpios->busy);
 }
+
+/**
+ * morse_hw_digital_reset() - Trigger digital reset via register write.
+ *
+ * @mors: Morse chip instance
+ */
+int morse_hw_digital_reset(struct morse *mors);
+
+/**
+ * morse_hw_clear_aon() - Clear AON state in preparation for digital reset.
+ *
+ * @mors: Morse chip instance
+ */
+void morse_hw_clear_aon(struct morse *mors);
+
+/**
+ * morse_hw_coredump_if_stopped() - Check if HW has stopped and create coredump if it did.
+ *
+ * @mors: Morse device instance
+ *
+ * Return: 0 if the HW did not stop, else -ENODEV.
+ */
+int morse_hw_coredump_if_stopped(struct morse *mors);
 
 #endif /* !_MORSE_HW_H_ */

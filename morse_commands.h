@@ -17,7 +17,7 @@
 #define __sle64 __le64
 
 #define MORSE_CMD_SEMVER_MAJOR 57
-#define MORSE_CMD_SEMVER_MINOR 13
+#define MORSE_CMD_SEMVER_MINOR 20
 #define MORSE_CMD_SEMVER_PATCH 0
 
 #define MORSE_CMD_TYPE_REQ  BIT(0)
@@ -3293,12 +3293,14 @@ enum morse_cmd_hart_id {
  * enum morse_cmd_crash_type - Type of firmware crash to be triggered.
  * @MORSE_CMD_CRASH_TYPE_ASSERTION_FAILURE: Assertion failure
  * @MORSE_CMD_CRASH_TYPE_NULL_DEREFERENCE: Null pointer dereference
- * @MORSE_CMD_CRASH_TYPE_HANG: Hang without reaching the crash handler
+ * @MORSE_CMD_CRASH_TYPE_HANG: Hang
+ * @MORSE_CMD_CRASH_TYPE_HANG_NOIRQ: Hang with interrupts disabled
  */
 enum morse_cmd_crash_type {
 	MORSE_CMD_CRASH_TYPE_ASSERTION_FAILURE = 0,
 	MORSE_CMD_CRASH_TYPE_NULL_DEREFERENCE  = 1,
 	MORSE_CMD_CRASH_TYPE_HANG	       = 2,
+	MORSE_CMD_CRASH_TYPE_HANG_NOIRQ	       = 3,
 };
 
 /**
@@ -3343,6 +3345,7 @@ enum morse_cmd_slow_clock_mode {
  *                                           only).
  * @MORSE_CMD_PARAM_ID_SCAN_INTERVAL_LIMIT_S: Maximum interval between scans when reconnecting
  *                                            (FullMAC only).
+ * @MORSE_CMD_PARAM_ID_AMPDU_FEEDBACK: Enable/Disable feedback for each MPDU in an AMPDU.
  */
 enum morse_cmd_param_id {
 	MORSE_CMD_PARAM_ID_MAX_TRAFFIC_DELIVERY_WAIT_US	  = 0,
@@ -3380,7 +3383,8 @@ enum morse_cmd_param_id {
 	MORSE_CMD_PARAM_ID_ALLOW_PRE_ASSOC_OFF_CHAN_PS	= 34,
 	MORSE_CMD_PARAM_ID_SCAN_INTERVAL_BASE_S		= 35,
 	MORSE_CMD_PARAM_ID_SCAN_INTERVAL_LIMIT_S	= 36,
-	MORSE_CMD_PARAM_ID_LAST				= 37,
+	MORSE_CMD_PARAM_ID_AMPDU_FEEDBACK		= 37,
+	MORSE_CMD_PARAM_ID_LAST				= 38,
 };
 
 /**

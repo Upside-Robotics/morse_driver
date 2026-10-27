@@ -36,9 +36,7 @@ set -euo pipefail
 for argument in "$@"; do
     case "$argument" in M=*) driver=${argument#M=} ;; esac
 done
-mkdir -p "$driver/dot11ah"
 printf 'module\n' > "$driver/morse.ko"
-printf 'module\n' > "$driver/dot11ah/dot11ah.ko"
 MOCK
 cat > "$temporary/bin/modinfo" <<'MOCK'
 #!/usr/bin/env bash
@@ -48,7 +46,7 @@ chmod +x "$temporary/bin/make" "$temporary/bin/modinfo"
 export PATH="$temporary/bin:$PATH"
 bash "$temporary/driver/bootc/build.sh" modules "$temporary/kernel" "$temporary/root"
 test -s "$temporary/root/usr/lib/modules/7.2.0-test/updates/morse/morse.ko"
-test -s "$temporary/root/usr/lib/modules/7.2.0-test/updates/morse/dot11ah.ko"
+test ! -e "$temporary/root/usr/lib/modules/7.2.0-test/updates/morse/dot11ah.ko"
 if TEST_VERMAGIC=wrong-kernel bash "$temporary/driver/bootc/build.sh" modules \
     "$temporary/kernel" "$temporary/bad-root" > "$temporary/output" 2>&1; then
     echo 'Mismatched kernel module was accepted' >&2

@@ -454,22 +454,25 @@ static void __skbq_drop_pending_skb(struct morse_skbq *mq, struct sk_buff *skb)
 static bool tx_skb_is_ps_filtered(struct morse_skbq *mq, struct sk_buff *skb,
 				  struct morse_skb_tx_status *tx_sts)
 {
-	struct ieee80211_tx_info *txi = IEEE80211_SKB_CB(skb);
 	struct ieee80211_vif *vif = NULL;
-	struct morse_vif *mors_vif;
+	bool supports_ps_filter;
 
 	MORSE_WARN_ON_ONCE(FEATURE_ID_DEFAULT,
 			   !(le32_to_cpu(tx_sts->flags) & MORSE_TX_STATUS_FLAGS_PS_FILTERED));
 
 	if (is_fullmac_mode()) {
-		mors_vif = morse_wiphy_get_sta_vif(mq->mors);
+		supports_ps_filter = morse_wiphy_get_sta_vif(mq->mors)->supports_ps_filter;
 	} else {
+		struct ieee80211_tx_info *txi = IEEE80211_SKB_CB(skb);
+		struct morse_vif *mors_vif;
+
 		vif = txi->control.vif ?
 		    txi->control.vif : morse_get_vif_from_tx_status(mq->mors, tx_sts);
 		mors_vif = ieee80211_vif_to_morse_vif(vif);
+		supports_ps_filter = mors_vif->supports_ps_filter;
 	}
 
-	if (!mors_vif->supports_ps_filter) {
+	if (!supports_ps_filter) {
 		/* Do not rebuffer invalid pages, or on VIFs that do not support
 		 * PS filtering.
 		 */
@@ -547,7 +550,6 @@ static void morse_skbq_tx_status_process(struct morse *mors, struct sk_buff *skb
 		/* Unlock before mac80211/cfg80211 callbacks as these may re-enter the TX path */
 		__morse_skbq_unlink(mq, &mq->pending, tx_skb);
 		spin_unlock_bh(&mq->lock);
-
 		if (is_fullmac_mode())
 			morse_skbq_tx_finish_fullmac(mq, tx_skb, tx_sts);
 		else
@@ -1541,6 +1543,7 @@ int morse_skbq_skb_tx(struct morse_skbq *mq, struct sk_buff **skb_orig,
 	int ret = 0;
 	u8 *aligned_head;
 	u8 *data;
+	bool is_cmd_channel;
 
 	WARN_ON(!mq);
 
@@ -1559,7 +1562,9 @@ int morse_skbq_skb_tx(struct morse_skbq *mq, struct sk_buff **skb_orig,
 		return -EPERM;
 	}
 
-	if (channel == MORSE_SKB_CHAN_COMMAND) {
+	is_cmd_channel = channel == MORSE_SKB_CHAN_COMMAND;
+
+	if (is_cmd_channel) {
 		if (test_bit(MORSE_STATE_FLAG_HOST_TO_CHIP_CMD_BLOCKED, &mors->state_flags)) {
 			morse_tx_complete_or_free(mors, skb, channel, false);
 			return -EPERM;
@@ -1669,4 +1674,57 @@ bool morse_validate_skb_checksum(u8 *data)
 	xor = xor & 0x00FFFFFF;
 
 	return xor == header_xor;
+}
+
+#if KERNEL_VERSION(4, 15, 0) > LINUX_VERSION_CODE
+static void morse_skbq_stale_tx_status_timer(unsigned long addr)
+{
+	struct morse *mors = (struct morse *)addr;
+#else
+static void morse_skbq_stale_tx_status_timer(struct timer_list *t)
+{
+	struct morse *mors = TIMER_TO_OBJ(mors, t, stale_status.timer);
+#endif
+
+	if (!mors || !mors->stale_status.enabled)
+		return;
+
+	spin_lock_bh(&mors->stale_status.lock);
+
+	if (mors->cfg->ops->skbq_get_tx_status_pending_count(mors))
+		queue_work(mors->net_wq, &mors->tx_stale_work);
+
+	spin_unlock_bh(&mors->stale_status.lock);
+}
+
+int morse_skbq_stale_tx_status_timer_init(struct morse *mors)
+{
+	MORSE_WARN_ON(FEATURE_ID_DEFAULT, mors->stale_status.enabled);
+
+	spin_lock_init(&mors->stale_status.lock);
+
+	mors->stale_status.enabled = true;
+
+#if KERNEL_VERSION(4, 15, 0) > LINUX_VERSION_CODE
+	init_timer(&mors->stale_status.timer);
+	mors->stale_status.timer.data = (unsigned long)mors;
+	mors->stale_status.timer.function = morse_skbq_stale_tx_status_timer;
+	add_timer(&mors->stale_status.timer);
+#else
+	timer_setup(&mors->stale_status.timer, morse_skbq_stale_tx_status_timer, 0);
+#endif
+
+	return 0;
+}
+
+int morse_skbq_stale_tx_status_timer_finish(struct morse *mors)
+{
+	if (!mors->stale_status.enabled)
+		return 0;
+
+	mors->stale_status.enabled = false;
+
+	DEL_TIMER_SYNC(&mors->stale_status.timer);
+
+	return 0;
 }

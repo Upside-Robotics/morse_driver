@@ -221,7 +221,8 @@ struct morse_skb_rate_info {
  * struct morse_skb_tx_status: TX status feedback
  * @flags: TX flags for this frame
  * @pkt_id: SKB packet id to match against tx_status
- * @ampdu_info: Info about which AMPDU this skb belonged to (if any).
+ * @per_attempt_ampdu_info: A bitmap indicating if each mpdu attempt was sent as part of an AMPDU.
+ * @per_attempt_missing_block_ack: A bitmap indicating if an AMPDU TX recieved no blockack.
  * @rates: rates an counts used
  */
 struct morse_skb_tx_status {
@@ -230,22 +231,12 @@ struct morse_skb_tx_status {
 	u8 tid;
 	/** The MORSE_SKB_CHAN_xxx that the frame being reported on belongs to */
 	u8 channel;
-	/**
-	 * Set to 0 if not ampdu (including smpdu).
-	 * Split into 3 fields:
-	 * | tag (6b) | ampdu_len (5b) | success_len (5b) |
-	 * tag: Identifier for this aggregation (wraps frequently)
-	 * ampdu_len: Number of MPDUs in AMPDU as transmitted
-	 * success_len: Number of MPDUs successfully received
-	 */
-	__le16 ampdu_info;
+	/** A bitmap indicating if each mpdu attempt was sent as part of an AMPDU */
+	u8 per_attempt_ampdu_info;
+	/** A bitmap indicating if an AMPDU TX recieved no blockack */
+	u8 per_attempt_missing_block_ack;
 	struct morse_skb_rate_info rates[MORSE_SKB_MAX_RATES];
 } __packed;
-
-/* Getter macro for ampdu_info field in struct morse_skb_tx_status */
-#define MORSE_TXSTS_AMPDU_INFO_GET_TAG(x)   (((x) >> 10) & 0x3F)
-#define MORSE_TXSTS_AMPDU_INFO_GET_LEN(x)   (((x) >> 5) & 0x1F)
-#define MORSE_TXSTS_AMPDU_INFO_GET_SUC(x)  ((x) & 0x1F)
 
 /**
  * struct morse_skb_tx_info: TX information

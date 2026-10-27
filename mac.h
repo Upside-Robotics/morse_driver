@@ -70,8 +70,12 @@ int morse_mac_pkt_to_s1g(struct morse *mors, const struct ieee80211_sta *sta,
  */
 enum morse_cmd_slow_clock_mode morse_mac_slow_clock_mode(void);
 
-int morse_mac_health_check_init(struct morse *mors);
-void morse_mac_health_check_finish(struct morse *mors);
+/**
+ * morse_mac_cleanup_during_restart() - SoftMAC cleanup during restart triggered by healthcheck.
+ *
+ * @mors: morse chip instance
+ */
+void morse_mac_cleanup_during_restart(struct morse *mors);
 void morse_mac_mcs0_10_stats_dump(struct morse *mors, struct seq_file *file);
 void morse_mac_fill_tx_info(struct morse *mors, struct morse_skb_tx_info *tx_info,
 				   struct sk_buff *skb, struct ieee80211_vif *vif,
@@ -81,6 +85,7 @@ bool is_fullmac_mode(void);
 bool is_thin_lmac_mode(void);
 bool is_virtual_sta_test_mode(void);
 bool is_sw_crypto_mode(void);
+bool is_log_modparams_on_boot_enabled(void);
 
 /* Return a pointer to vif from vif id of tx status */
 struct ieee80211_vif *morse_get_vif_from_tx_status(struct morse *mors,
@@ -286,6 +291,38 @@ static inline void morse_mac_sta_set_ht_support(struct ieee80211_sta *sta, bool 
 }
 
 /**
+ * @brief Set the rate-control recommended maximum A-MSDU length for a STA.
+ *
+ * @param sta Station context
+ * @param len Maximum A-MSDU length in bytes
+ */
+static inline void morse_mac_sta_set_max_rc_amsdu_len(struct ieee80211_sta *sta, u16 len)
+{
+#if KERNEL_VERSION(5, 19, 0) > MAC80211_VERSION_CODE
+	sta->max_rc_amsdu_len = len;
+#else
+	sta->deflink.agg.max_rc_amsdu_len = len;
+	ieee80211_sta_recalc_aggregates(sta);
+#endif
+}
+
+/**
+ * @brief Get the rate-control recommended maximum A-MSDU length for a STA.
+ *
+ * @param sta Station context
+ *
+ * @returns limit (bytes)
+ */
+static inline u16 morse_mac_sta_get_max_rc_amsdu_len(struct ieee80211_sta *sta)
+{
+#if KERNEL_VERSION(5, 19, 0) > MAC80211_VERSION_CODE
+	return sta->max_rc_amsdu_len;
+#else
+	return sta->deflink.agg.max_rc_amsdu_len;
+#endif
+}
+
+/**
  * @brief Get association ID for STA
  *
  * @param vif Interface pointer to get AID
@@ -353,8 +390,6 @@ static inline bool morse_mac_mesh_enabled(struct wiphy *wiphy)
 bool morse_mac_is_subband_enable(void);
 uint morse_mac_get_max_rate_tries(void);
 uint morse_mac_get_max_rate(void);
-
-int morse_mac_get_watchdog_interval_secs(void);
 
 int morse_mac_send_vendor_wake_action_frame(struct morse *mors, const u8 *dest_addr,
 					    const u8 *payload, int payload_len);
@@ -454,6 +489,7 @@ bool morse_mac_is_rts_8mhz_enabled(void);
 bool morse_mac_is_cts_to_self_enabled(void);
 bool morse_mac_is_amsdu_enabled(struct morse *mors);
 bool morse_mac_is_airtime_fairness_enabled(void);
+bool morse_mac_is_pre_assoc_ps_enabled(void);
 
 /**
  * morse_mac_update_vif_bss_color - Update BSS color in Morse persistent vif config.
@@ -466,10 +502,5 @@ bool morse_mac_is_airtime_fairness_enabled(void);
  */
 int morse_mac_update_vif_bss_color(struct morse *mors, struct ieee80211_vif *vif,
 								u8 bss_color);
-
-static inline int morse_mac_get_attach_config(void)
-{
-	return is_fullmac_mode() ? MORSE_CMD_HEADLESS_CFG_OPTION_KEEP_IFACES : 0;
-}
 
 #endif /* !_MORSE_MAC_H_ */

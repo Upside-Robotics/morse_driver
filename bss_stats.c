@@ -9,6 +9,12 @@
 #include "bss_stats.h"
 #include "vendor.h"
 
+/* BSS stats peer list and timer are used for all VIF types except STA */
+static inline bool morse_bss_stats_has_peer_list(struct morse_vif *mors_vif)
+{
+	return morse_vif_to_ieee80211_vif(mors_vif)->type != NL80211_IFTYPE_STATION;
+}
+
 /**
  * Structure passed to station iterate func
  */
@@ -68,7 +74,7 @@ static void find_max_mcs_info(struct morse_sta_stats *stats, bool is_tx,
 		const u32 *row = hist->h[i];
 
 		for (j = 0; j < ARRAY_SIZE(hist->h[0]); j++) {
-			if (row[j] >= out->count) {
+			if (row[j] > out->count) {
 				out->count = row[j];
 				out->mcs = i;
 				out->bw = j;
@@ -106,7 +112,7 @@ static void prepare_sta_stats(void *data, struct morse_sta *msta)
 	if (!mors_vif->ap)
 		return;
 
-	bss_stats = &mors_vif->ap->bss_stats;
+	bss_stats = &mors_vif->bss_stats;
 	lockdep_assert_held(&bss_stats->lock);
 
 	if (!msta) {
@@ -127,7 +133,7 @@ static void prepare_sta_stats(void *data, struct morse_sta *msta)
 
 	bs_sta = &msta->bss_stats_sta;
 	sta_index = iter_data->evt_data->num_stas;
-	if (sta_index > iter_data->num_stas_alloc) {
+	if (sta_index >= iter_data->num_stas_alloc) {
 		MORSE_DBG(mors, "no space for new STA %pM in stats\n",
 		       msta->addr);
 		return;
@@ -203,8 +209,10 @@ static void prepare_sta_stats(void *data, struct morse_sta *msta)
 		sta_stats->avg_rx_mcs_info.short_gi = msta->last_sta_rx_rate.guard;
 	}
 #endif
-	sta_stats->num_tx_retries = bs_sta->stats->num_tx_retries;
-	sta_stats->num_rx_retries = bs_sta->stats->num_rx_retries;
+	for (ac = 0; ac < IEEE80211_NUM_ACS; ac++) {
+		sta_stats->num_tx_retries += bs_sta->stats->num_tx_retries[ac];
+		sta_stats->num_rx_retries += bs_sta->stats->num_rx_retries[ac];
+	}
 	now = ktime_get_ns();
 	elapsed_ns = now - bs_sta->stats->last_reset_time;
 	do_div(elapsed_ns, 1000);
@@ -241,8 +249,8 @@ static void morse_bss_stats_timer_cb(struct timer_list *t)
 #else
 	struct morse_bss_stats_context *bss_stats = TIMER_TO_OBJ(bss_stats, t, timer);
 #endif
-	struct morse_ap *ap = container_of(bss_stats, struct morse_ap, bss_stats);
-	struct morse_vif *mors_vif = ap->mors_vif;
+	struct morse_vif *mors_vif = container_of(bss_stats, struct morse_vif, bss_stats);
+	struct morse_ap *ap = mors_vif->ap;
 	struct sta_stats_iter_data iter_data;
 	struct morse *mors = morse_vif_to_morse(mors_vif);
 	u32 monitor_window_ms = bss_stats->config ? bss_stats->config->monitor_window_ms :
@@ -252,7 +260,7 @@ static void morse_bss_stats_timer_cb(struct timer_list *t)
 	int ret;
 
 	/* No STAs associated yet */
-	if (!ap->num_stas)
+	if (!ap || !ap->num_stas)
 		goto exit;
 
 	iter_data.num_stas_alloc = ap->num_stas;
@@ -297,17 +305,17 @@ void morse_bss_stats_update_tx(struct ieee80211_vif *vif, struct sk_buff *skb,
 {
 	struct morse_sta *msta;
 	struct morse_vif *mors_vif = ieee80211_vif_to_morse_vif((struct ieee80211_vif *)vif);
-	struct morse_bss_stats_context *bss_stats;
+	struct morse_bss_stats_context *bss_stats = &mors_vif->bss_stats;
 	struct morse *mors;
 	struct morse_sta_stats *entry;
+	struct ieee80211_tx_info *txi;
 	size_t len;
 	u16 tid;
 	int ac;
 	__le16 fc;
 	u64 now_us, iat_us, jitter_us;
 
-	if (vif->type != NL80211_IFTYPE_AP || !skb ||
-		!morse_bss_stats_is_enabled(mors_vif))
+	if (!skb)
 		return;
 
 	fc = ((struct ieee80211_hdr *)skb->data)->frame_control;
@@ -317,8 +325,12 @@ void morse_bss_stats_update_tx(struct ieee80211_vif *vif, struct sk_buff *skb,
 
 	msta = (struct morse_sta *)sta->drv_priv;
 	mors = morse_vif_to_morse(mors_vif);
-	bss_stats = &mors_vif->ap->bss_stats;
-	tid = ieee80211_get_tid((struct ieee80211_hdr *)skb->data);
+
+	if (!morse_bss_stats_is_enabled(mors_vif) && !morse_sta_debugfs_set(msta))
+		return;
+
+	/* Use skb->priority for TID — set by mac80211 before S1G conversion */
+	tid = skb->priority & IEEE80211_QOS_CTL_TID_MASK;
 	ac = dot11_tid_to_ac(tid);
 	if (ac >= IEEE80211_NUM_ACS) {
 		MORSE_ERR(mors, "%s: Invalid AC:%d TID:%d\n", __func__, ac, tid);
@@ -326,47 +338,39 @@ void morse_bss_stats_update_tx(struct ieee80211_vif *vif, struct sk_buff *skb,
 		return;
 	}
 	len = skb->len;
+	txi = IEEE80211_SKB_CB(skb);
 
-	spin_lock_bh(&bss_stats->lock);
 	entry = msta->bss_stats_sta.stats;
 	if (!entry)
-		goto exit;
+		return;
+
+	spin_lock_bh(&bss_stats->lock);
 
 	entry->num_tx_bytes[ac] += len;
 	entry->num_tx_pkts[ac]++;
+	entry->num_tx_retries[ac] += tx_attempts - 1;
+	if ((le32_to_cpu(tx_status->flags) & MORSE_TX_STATUS_FLAGS_NO_ACK) &&
+	    !(txi->flags & IEEE80211_TX_CTL_NO_ACK))
+		entry->num_tx_dropped[ac]++;
+
 	entry->avg_tx_pkt_size = ema_update_u32(entry->avg_tx_pkt_size, len);
-	entry->num_tx_retries += tx_attempts - 1;
-
 	now_us = div_u64(ktime_get_ns(), 1000);
-	if (entry->num_tx_pkts[ac] <= 1) {
-		entry->last_tx_timestamp_us = now_us;
-		goto exit;
+	if (entry->num_tx_pkts[ac] > 1) {
+		/* Calculate Inter-Packet Arrival Time (IAT) in microseconds */
+		iat_us = now_us - entry->last_tx_timestamp_us;
+		jitter_us = (iat_us > entry->last_tx_iat_us) ?
+						(iat_us - entry->last_tx_iat_us) :
+						(entry->last_tx_iat_us - iat_us);
+		entry->avg_tx_jitter_us = ema_update_u32(entry->avg_tx_jitter_us, jitter_us);
+		entry->last_tx_iat_us = iat_us;
+		entry->avg_tx_iat_us = ema_update_u32(entry->avg_tx_iat_us, iat_us);
 	}
-	/* Calculate Inter-Packet Arrival Time (IAT) in microseconds */
-	iat_us = now_us - entry->last_tx_timestamp_us;
-
-	/* Calculate Jitter as absolute difference from last IAT */
-	jitter_us = (iat_us > entry->last_tx_iat_us) ?
-					(iat_us - entry->last_tx_iat_us) :
-					(entry->last_tx_iat_us - iat_us);
-
-	/* Update average IAT & jitter */
-	entry->avg_tx_jitter_us =
-		ema_update_u32(entry->avg_tx_jitter_us, jitter_us);
-
-	entry->last_tx_iat_us = iat_us;
-	entry->avg_tx_iat_us = ema_update_u32(entry->avg_tx_iat_us, iat_us);
 	entry->last_tx_timestamp_us = now_us;
 #ifdef CONFIG_MORSE_RC
-	if (!mmrc_rate_is_valid(&msta->last_sta_tx_rate)) {
-		MORSE_ERR_RATELIMITED(mors, "%s: Invalid Tx bw:%u mcs:%u\n",
-			__func__, msta->last_sta_tx_rate.bw, msta->last_sta_tx_rate.rate);
-		goto exit;
-	}
-	entry->tx_mcs_hist.h[msta->last_sta_tx_rate.rate][msta->last_sta_tx_rate.bw]++;
+	if (mmrc_rate_is_valid(&msta->last_sta_tx_rate))
+		entry->tx_mcs_hist.h[msta->last_sta_tx_rate.rate][msta->last_sta_tx_rate.bw]++;
 #endif
 
-exit:
 	spin_unlock_bh(&bss_stats->lock);
 }
 
@@ -376,7 +380,7 @@ void morse_bss_stats_update_rx(struct ieee80211_vif *vif, struct sk_buff *skb,
 	struct morse_sta *msta = (struct morse_sta *)sta->drv_priv;
 	struct morse_vif *mors_vif = ieee80211_vif_to_morse_vif(vif);
 	struct morse *mors = morse_vif_to_morse(mors_vif);
-	struct morse_bss_stats_context *bss_stats;
+	struct morse_bss_stats_context *bss_stats = &mors_vif->bss_stats;
 	struct morse_sta_stats *entry;
 	struct mmrc_rate rx_rate;
 	size_t len;
@@ -385,12 +389,12 @@ void morse_bss_stats_update_rx(struct ieee80211_vif *vif, struct sk_buff *skb,
 	__le16 fc;
 	u64 iat_us, jitter_us;
 
-	if (vif->type != NL80211_IFTYPE_AP ||
-		!morse_bss_stats_is_enabled(mors_vif))
+	if (!morse_bss_stats_is_enabled(mors_vif) && !morse_sta_debugfs_set(msta))
 		return;
 
 	fc = ((struct ieee80211_hdr *)skb->data)->frame_control;
-	if (!ieee80211_is_data_qos(fc))
+	if (!ieee80211_is_data_qos(fc) ||
+		is_multicast_ether_addr(((struct ieee80211_hdr *)skb->data)->addr1))
 		return;
 
 	tid = ieee80211_get_tid((struct ieee80211_hdr *)skb->data);
@@ -402,51 +406,39 @@ void morse_bss_stats_update_rx(struct ieee80211_vif *vif, struct sk_buff *skb,
 	}
 
 	len = skb->len;
-	bss_stats = &mors_vif->ap->bss_stats;
 
-	spin_lock_bh(&bss_stats->lock);
 	entry = msta->bss_stats_sta.stats;
 	if (!entry)
-		goto exit;
+		return;
+
+	spin_lock_bh(&bss_stats->lock);
 
 	entry->num_rx_bytes[ac] += len;
 	entry->num_rx_pkts[ac]++;
-	entry->avg_rx_pkt_size = ema_update_u32(entry->avg_rx_pkt_size, len);
-
-	if (entry->num_rx_pkts[ac] <= 1) {
-		entry->last_rx_timestamp_us = le64_to_cpu(rx_status->rx_timestamp_us);
-		goto exit;
-	}
-
-	/* Calculate Inter-Packet Arrival Time (IAT) and Jitter */
-	iat_us = le64_to_cpu(rx_status->rx_timestamp_us) -
-					entry->last_rx_timestamp_us;
-
-	jitter_us = (iat_us > entry->last_rx_iat_us) ?
-			(iat_us - entry->last_rx_iat_us) :
-			(entry->last_rx_iat_us - iat_us);
-	entry->last_rx_iat_us = iat_us;
 	if (le16_to_cpu(fc) & IEEE80211_FCTL_RETRY)
-		entry->num_rx_retries++;
-	/* Update average IAT & jitter */
-	entry->avg_rx_iat_us = ema_update_u32(entry->avg_rx_iat_us, iat_us);
-	entry->avg_rx_jitter_us =
-		ema_update_u32(entry->avg_rx_jitter_us, jitter_us);
-	entry->last_rx_timestamp_us = le64_to_cpu(rx_status->rx_timestamp_us);
+		entry->num_rx_retries[ac]++;
 
+	entry->avg_rx_pkt_size = ema_update_u32(entry->avg_rx_pkt_size, len);
+	if (entry->num_rx_pkts[ac] > 1) {
+		iat_us = le64_to_cpu(rx_status->rx_timestamp_us) - entry->last_rx_timestamp_us;
+		jitter_us = (iat_us > entry->last_rx_iat_us) ?
+				(iat_us - entry->last_rx_iat_us) :
+				(entry->last_rx_iat_us - iat_us);
+		entry->last_rx_iat_us = iat_us;
+		entry->avg_rx_iat_us = ema_update_u32(entry->avg_rx_iat_us, iat_us);
+		entry->avg_rx_jitter_us = ema_update_u32(entry->avg_rx_jitter_us, jitter_us);
+	}
+	entry->last_rx_timestamp_us = le64_to_cpu(rx_status->rx_timestamp_us);
 #ifdef CONFIG_MORSE_RC
 	rx_rate.rate = morse_ratecode_mcs_index_get(rx_status->morse_ratecode);
 	rx_rate.bw = morse_ratecode_bw_index_get(rx_status->morse_ratecode);
-
-	if (!mmrc_rate_is_valid(&rx_rate)) {
+	if (mmrc_rate_is_valid(&rx_rate))
+		entry->rx_mcs_hist.h[rx_rate.rate][rx_rate.bw]++;
+	else
 		MORSE_ERR_RATELIMITED(mors, "%s: Invalid Rx bw:%u mcs:%u\n",
-			__func__, rx_rate.bw, rx_rate.rate);
-		goto exit;
-	}
-	entry->rx_mcs_hist.h[rx_rate.rate][rx_rate.bw]++;
+				      __func__, rx_rate.bw, rx_rate.rate);
 #endif
 
-exit:
 	spin_unlock_bh(&bss_stats->lock);
 }
 
@@ -462,13 +454,14 @@ static void morse_bss_stats_remove_sta(struct ieee80211_vif *vif, struct ieee802
 	struct morse_vif *mors_vif = ieee80211_vif_to_morse_vif(vif);
 	struct morse_bss_stats_context *bss_stats;
 
-	if (!mors_vif || !mors_vif->ap)
+	if (!mors_vif)
 		return;
 
-	bss_stats = &mors_vif->ap->bss_stats;
+	bss_stats = &mors_vif->bss_stats;
 	spin_lock_bh(&bss_stats->lock);
 	if (msta->bss_stats_sta.stats) {
-		list_del_init(&msta->bss_stats_sta.list);
+		if (morse_bss_stats_has_peer_list(mors_vif))
+			list_del_init(&msta->bss_stats_sta.list);
 		kfree(msta->bss_stats_sta.stats);
 		msta->bss_stats_sta.stats = NULL;
 	}
@@ -491,23 +484,26 @@ static int morse_bss_stats_add_sta(struct ieee80211_vif *vif, struct ieee80211_s
 	struct morse_sta_stats *stats;
 	u64 now;
 
-	if (!mors_vif || !mors_vif->ap)
+	if (!mors_vif)
 		return -EINVAL;
-	bss_stats = &mors_vif->ap->bss_stats;
 
 	stats = kzalloc(sizeof(*stats), GFP_KERNEL);
 	if (!stats)
 		return -ENOMEM;
 
+	now = ktime_get_ns();
+	bss_stats = &mors_vif->bss_stats;
+
 	spin_lock_bh(&bss_stats->lock);
 
 	kfree(msta->bss_stats_sta.stats);
 	msta->bss_stats_sta.stats = stats;
-	list_add(&msta->bss_stats_sta.list, &bss_stats->stas);
 	msta->bss_stats_sta.last_update = jiffies;
-	now = ktime_get_ns();
 	stats->last_reset_time = now;
 	stats->hist_last_reset_jiffies = jiffies;
+
+	if (morse_bss_stats_has_peer_list(mors_vif))
+		list_add(&msta->bss_stats_sta.list, &bss_stats->stas);
 
 	spin_unlock_bh(&bss_stats->lock);
 
@@ -520,9 +516,6 @@ void morse_bss_stats_update_sta_state(struct morse *mors,
 			      enum ieee80211_sta_state new_state)
 {
 	struct morse_sta *msta = (struct morse_sta *)sta->drv_priv;
-
-	if (vif->type != NL80211_IFTYPE_AP)
-		return;
 
 	/* Update Morse BSS Stats STA list */
 	if (old_state < new_state && new_state == IEEE80211_STA_ASSOC) {
@@ -589,10 +582,10 @@ void morse_bss_stats_reconfig(struct morse *mors, struct morse_vif *mors_vif)
 
 	lockdep_assert_held(&mors->persistent_vif_config.lock);
 
-	if (!mors_vif->ap)
+	if (!mors_vif_conf || !mors_vif->ap)
 		return;
 
-	bss_stats = &mors_vif->ap->bss_stats;
+	bss_stats = &mors_vif->bss_stats;
 	bss_stats_conf = &mors_vif_conf->bss_stats_conf;
 
 	if (!bss_stats_conf)
@@ -613,7 +606,7 @@ int morse_bss_stats_pause(struct morse_vif *mors_vif)
 		return -ENOTSUPP;
 
 	mors = morse_vif_to_morse(mors_vif);
-	bss_stats = &mors_vif->ap->bss_stats;
+	bss_stats = &mors_vif->bss_stats;
 	bss_stats_conf = bss_stats->config;
 
 	if (!bss_stats_conf)
@@ -642,7 +635,7 @@ int morse_bss_stats_resume(struct morse_vif *mors_vif)
 		return -ENOTSUPP;
 
 	mors = morse_vif_to_morse(mors_vif);
-	bss_stats = &mors_vif->ap->bss_stats;
+	bss_stats = &mors_vif->bss_stats;
 	bss_stats_conf = bss_stats->config;
 
 	if (!bss_stats_conf || !bss_stats_conf->enabled)
@@ -672,7 +665,7 @@ int morse_cmd_process_bss_stats_conf(struct morse *mors, struct morse_vif *mors_
 	struct morse_bss_stats_config *bss_stats_conf;
 	struct morse_persistent_vif_configs *mors_vif_conf;
 	struct ieee80211_vif *vif = morse_vif_to_ieee80211_vif(mors_vif);
-	struct morse_bss_stats_context *bss_stats = &mors_vif->ap->bss_stats;
+	struct morse_bss_stats_context *bss_stats = &mors_vif->bss_stats;
 
 	mutex_lock(&mors->persistent_vif_config.lock);
 
@@ -714,8 +707,8 @@ exit:
 
 bool morse_bss_stats_is_enabled(struct morse_vif *mors_vif)
 {
-	return mors_vif && mors_vif->ap &&
-	    mors_vif->ap->bss_stats.config && mors_vif->ap->bss_stats.config->enabled;
+	return mors_vif && mors_vif->bss_stats.config &&
+		mors_vif->bss_stats.config->enabled;
 }
 
 int morse_bss_stats_init(struct morse_vif *mors_vif)
@@ -723,11 +716,11 @@ int morse_bss_stats_init(struct morse_vif *mors_vif)
 	struct morse_bss_stats_context *bss_stats;
 	struct morse *mors;
 
-	if (!mors_vif || !mors_vif->ap)
-		return -ENOTSUPP;
+	if (!mors_vif)
+		return -EINVAL;
 
 	mors = morse_vif_to_morse(mors_vif);
-	bss_stats = &mors_vif->ap->bss_stats;
+	bss_stats = &mors_vif->bss_stats;
 
 	memset(bss_stats, 0, sizeof(*bss_stats));
 
@@ -737,14 +730,16 @@ int morse_bss_stats_init(struct morse_vif *mors_vif)
 	bss_stats->mors = mors;
 	bss_stats->mors_vif = mors_vif;
 
+	if (morse_vif_to_ieee80211_vif(mors_vif)->type == NL80211_IFTYPE_AP) {
 #if KERNEL_VERSION(4, 15, 0) > LINUX_VERSION_CODE
-	init_timer(&bss_stats->timer);
-	bss_stats->timer.data = (unsigned long)bss_stats;
-	bss_stats->timer.function = morse_bss_stats_timer_cb;
-	add_timer(&bss_stats->timer);
+		init_timer(&bss_stats->timer);
+		bss_stats->timer.data = (unsigned long)bss_stats;
+		bss_stats->timer.function = morse_bss_stats_timer_cb;
+		add_timer(&bss_stats->timer);
 #else
-	timer_setup(&bss_stats->timer, morse_bss_stats_timer_cb, 0);
+		timer_setup(&bss_stats->timer, morse_bss_stats_timer_cb, 0);
 #endif
+	}
 
 	return 0;
 }
@@ -753,10 +748,11 @@ void morse_bss_stats_deinit(struct morse_vif *mors_vif)
 {
 	struct morse_bss_stats_context *bss_stats;
 
-	if (!mors_vif || !mors_vif->ap)
+	if (!mors_vif)
 		return;
 
-	bss_stats = &mors_vif->ap->bss_stats;
-	DEL_TIMER_SYNC(&bss_stats->timer);
+	bss_stats = &mors_vif->bss_stats;
+	if (morse_vif_to_ieee80211_vif(mors_vif)->type == NL80211_IFTYPE_AP)
+		DEL_TIMER_SYNC(&bss_stats->timer);
 	morse_bss_stats_remove_all(mors_vif, bss_stats);
 }

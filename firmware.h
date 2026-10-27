@@ -63,7 +63,8 @@ enum morse_fw_extended_host_table_tag {
 	MORSE_FW_HOST_TABLE_TAG_PAGER_BYPASS_CMD_RESP = 5,
 	MORSE_FW_HOST_TABLE_TAG_HEADLESS_CFG_ADDR = 6,
 	MORSE_FW_HOST_TABLE_TAG_MAX_AP_NUM_STA = 7,
-	MORSE_FW_HOST_TABLE_TAG_BOOT_CODE = 8
+	MORSE_FW_HOST_TABLE_TAG_BOOT_CODE = 8,
+	MORSE_FW_HOST_TABLE_TAG_CRASH_INFO_LOCATION = 9,
 };
 
 struct extended_host_table_tlv_hdr {
@@ -153,6 +154,12 @@ struct extended_host_table_pager_pkt_memory {
 	u8 page_len_reserved;
 	/** Number of pages */
 	u8 num;
+};
+
+struct extended_host_table_crash_info_location {
+	struct extended_host_table_tlv_hdr header;
+	__le32 addr;
+	__le32 len;
 };
 
 struct extended_host_table {
@@ -263,5 +270,17 @@ enum host_table_firmware_flags morse_firmware_get_fw_flags(struct morse *mors);
  * Return: Boot code description
  */
 const char *morse_firmware_boot_code_to_str(enum morse_cmd_boot_code boot_code);
+
+/**
+ * morse_firmware_get_crash_info_locations() - Get crash info locations from extended host table.
+ *
+ * This function assumes that firmware is already loaded. It's intended to be called during
+ * HW reattach.
+ *
+ * @mors morse device instance
+ *
+ * Return: 0 if crash info locations retrieved, else error
+ */
+int morse_firmware_get_crash_info_locations(struct morse *mors);
 
 #endif /* !_MORSE_FW_H_ */

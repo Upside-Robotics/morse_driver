@@ -20,10 +20,6 @@
  */
 #define YAPS_TX_SKBQ_MAX			4
 
-/* Enable to support benchmarking the interface */
-
-#define MORSE_YAPS_SUPPORTS_BENCHMARK
-
 extern const struct chip_if_ops morse_yaps_ops;
 
 enum morse_yaps_to_chip_q {
@@ -70,10 +66,8 @@ struct morse_yaps {
 	struct morse_skbq cmd_q;
 	struct morse_skbq cmd_resp_q;
 
-#ifdef MORSE_YAPS_SUPPORTS_BENCHMARK
 	atomic_t benchmark_cnt_fc;
 	atomic_t benchmark_cnt_tc;
-#endif
 
 	struct {
 		struct timer_list timer;

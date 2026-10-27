@@ -143,6 +143,10 @@ enum ieee80211_s1g_rps_raw_chan_activity_flags {
 
 #define MORSE_RAW_WARN_ON(_val)			MORSE_WARN_ON(FEATURE_ID_RAW, _val)
 
+/* True if the TLV field still fits within the command buffer */
+#define RAW_TLV_FITS(_head, _tail, _field) \
+					((size_t)((_tail) - (_head)) >= sizeof(_field))
+
 enum morse_cmd_raw_enable_type {
 	RAW_CMD_ENABLE_TYPE_GLOBAL = 0,
 	RAW_CMD_ENABLE_TYPE_SINGLE = 1,
@@ -938,13 +942,13 @@ static void morse_raw_do_update(struct morse_vif *mors_vif)
 
 	raw = &ap->raw;
 
+	mutex_lock(&raw->lock);
+
 	/* RPS IE should only be regenerated if RAW is enabled. */
 	if (!test_bit(RAW_STATE_ENABLED, &raw->flags)) {
 		MORSE_WARN_ON(FEATURE_ID_RAW, true);
 		goto cleanup;
 	}
-
-	mutex_lock(&raw->lock);
 
 	/* STAs have been added or removed, update AID list */
 	if (test_and_clear_bit(RAW_STATE_REFRESH_AIDS, &raw->flags)) {
@@ -1085,6 +1089,13 @@ static bool morse_raw_cmd_to_config(u8 *head, int len, struct morse_raw_config *
 
 		switch (tlv->tag) {
 		case MORSE_CMD_RAW_TLV_TAG_SLOT_DEF:
+			if (!RAW_TLV_FITS(head, tail, tlv->slot_def))
+				return false;
+
+			/* Slot count comes from userspace and is the divisor below */
+			if (!tlv->slot_def.num_slots)
+				return false;
+
 			cfg->slot_definition.num_slots = tlv->slot_def.num_slots;
 			cfg->slot_definition.slot_duration_us =
 				le32_to_cpu(tlv->slot_def.raw_duration_us) /
@@ -1096,6 +1107,9 @@ static bool morse_raw_cmd_to_config(u8 *head, int len, struct morse_raw_config *
 			break;
 
 		case MORSE_CMD_RAW_TLV_TAG_GROUP:
+			if (!RAW_TLV_FITS(head, tail, tlv->group))
+				return false;
+
 			cfg->start_aid = le16_to_cpu(tlv->group.aid_start);
 			cfg->end_aid = le16_to_cpu(tlv->group.aid_end);
 
@@ -1103,12 +1117,18 @@ static bool morse_raw_cmd_to_config(u8 *head, int len, struct morse_raw_config *
 			break;
 
 		case MORSE_CMD_RAW_TLV_TAG_START_TIME:
+			if (!RAW_TLV_FITS(head, tail, tlv->start_time))
+				return false;
+
 			cfg->start_time_us = le32_to_cpu(tlv->start_time.start_time_us);
 
 			head += sizeof(tlv->start_time);
 			break;
 
 		case MORSE_CMD_RAW_TLV_TAG_PRAW:
+			if (!RAW_TLV_FITS(head, tail, tlv->praw))
+				return false;
+
 			cfg->periodic.periodicity = tlv->praw.periodicity;
 			cfg->periodic.validity = tlv->praw.validity;
 			cfg->periodic.start_offset = tlv->praw.start_offset;
@@ -1122,6 +1142,9 @@ static bool morse_raw_cmd_to_config(u8 *head, int len, struct morse_raw_config *
 			break;
 
 		case MORSE_CMD_RAW_TLV_TAG_BCN_SPREAD:
+			if (!RAW_TLV_FITS(head, tail, tlv->bcn_spread))
+				return false;
+
 			cfg->beacon_spreading.max_spread = le16_to_cpu(tlv->bcn_spread.max_spread);
 			cfg->beacon_spreading.nominal_sta_per_beacon =
 					le16_to_cpu(tlv->bcn_spread.nominal_sta_per_bcn);
@@ -1465,11 +1488,17 @@ static int morse_raw_process_dynamic_cmd(struct morse_vif *mors_vif, struct mors
 
 	while (head < tail) {
 		struct morse_cmd_raw_tlv_dyn_config *config;
+		size_t config_len;
 
 		tlv = (union morse_cmd_raw_tlvs *)head;
 
 		switch (tlv->tag) {
 		case MORSE_CMD_RAW_TLV_TAG_DYN_GLOBAL:
+			if (!RAW_TLV_FITS(head, tail, tlv->dyn_global)) {
+				ret = -EINVAL;
+				break;
+			}
+
 			raw->dynamic.num_beacons =
 					le16_to_cpu(tlv->dyn_global.num_bcn_indexes);
 			num_configs = le16_to_cpu(tlv->dyn_global.num_configs);
@@ -1480,23 +1509,27 @@ static int morse_raw_process_dynamic_cmd(struct morse_vif *mors_vif, struct mors
 			head += sizeof(tlv->dyn_global);
 			break;
 		case MORSE_CMD_RAW_TLV_TAG_DYN_CONFIG:
-			config = (struct morse_cmd_raw_tlv_dyn_config *)tlv;
-			if (config) {
-				ret = morse_raw_process_config_group(mors_vif, raw,
-								     config, NULL);
-				head += le16_to_cpu(config->len) + sizeof(tlv->dyn_config);
+			if (!RAW_TLV_FITS(head, tail, tlv->dyn_config)) {
+				ret = -EINVAL;
+				break;
 			}
-			break;
-		case MORSE_CMD_RAW_TLV_TAG_SLOT_DEF:
-		case MORSE_CMD_RAW_TLV_TAG_GROUP:
-		case MORSE_CMD_RAW_TLV_TAG_START_TIME:
-		case MORSE_CMD_RAW_TLV_TAG_PRAW:
-		case MORSE_CMD_RAW_TLV_TAG_BCN_SPREAD:
-			/* Config TLVs to be processed with config group */
+
+			config = (struct morse_cmd_raw_tlv_dyn_config *)tlv;
+			config_len = le16_to_cpu(config->len);
+			if (config_len > (size_t)(tail - config->variable)) {
+				ret = -EINVAL;
+				break;
+			}
+
+			ret = morse_raw_process_config_group(mors_vif, raw, config, NULL);
+			head = config->variable + config_len;
 			break;
 		default:
-			/* unrecognised TLV */
-			WARN_ON(true);
+			/* Config TLVs are only valid nested inside a dynamic config, so
+			 * anything else here is malformed. Must error out rather than
+			 * continue without advancing head, which would spin on the loop
+			 * while holding the RAW lock.
+			 */
 			ret = -EINVAL;
 			break;
 		}

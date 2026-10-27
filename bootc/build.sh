@@ -27,12 +27,10 @@ build_modules() {
         CONFIG_MORSE_SDIO=n CONFIG_MORSE_SPI=n CONFIG_MORSE_VENDOR_COMMAND=y \
         CONFIG_MORSE_DEBUGFS=y CONFIG_MORSE_MONITOR=y DEBUG=n -j"$jobs" modules
     install -d "$output"
-    local module vermagic
-    for module in morse.ko dot11ah/dot11ah.ko; do
-        vermagic=$(modinfo -F vermagic "$driver/$module")
-        [[ "${vermagic%% *}" == "$kernel_release" ]] || fail "module/kernel release mismatch: $vermagic"
-        install -m 0644 "$driver/$module" "$output/$(basename -- "$module")"
-    done
+    local vermagic
+    vermagic=$(modinfo -F vermagic "$driver/morse.ko")
+    [[ "${vermagic%% *}" == "$kernel_release" ]] || fail "module/kernel release mismatch: $vermagic"
+    install -m 0644 "$driver/morse.ko" "$output/morse.ko"
 }
 
 fetch_source() {
@@ -46,7 +44,7 @@ fetch_source() {
 }
 
 build_cli() {
-    fetch_source morse_cli c0cb8a379ecd79912aefb954c00392b21e4d0b4e
+    fetch_source morse_cli f7b9293735e64f4ab99aa9fd75855f7ddbfdcb46
     patch -d "$work/morse_cli" -p1 < "$driver/bootc/cli-const-options.patch"
     make -C "$work/morse_cli" -j"$jobs" CONFIG_MORSE_TRANS_NL80211=1 CONFIG_MORSE_USB=1 all
     install -D -m 0755 "$work/morse_cli/morse_cli" "$destination/usr/bin/morse_cli"
@@ -56,7 +54,7 @@ build_cli() {
 }
 
 build_hostap() {
-    fetch_source hostap e7309b438eaec4b82f2db29e8ef7beaca3ca52c6
+    fetch_source hostap b1520965c5ae8596725fb4d62e5fd8ab964e580c
     patch -d "$work/hostap" -p1 < "$driver/bootc/hostap-unused-variable.patch"
     patch -d "$work/hostap" -p1 < "$driver/bootc/hostap-country-codes.patch"
     local component binary
@@ -78,7 +76,7 @@ build_hostap() {
 }
 
 install_firmware() {
-    fetch_source morse-firmware 919f27a6dc2d46a988682d6ff64dd3fdb9ffc465
+    fetch_source morse-firmware 1b15599cbbe891de4f27952bc7a24cb5bcf09c52
     local source="$work/morse-firmware" file
     install -d "$destination/usr/lib/firmware/morse"
     while IFS= read -r -d '' file; do

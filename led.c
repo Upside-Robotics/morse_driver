@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+#include "hw.h"
 #include "morse.h"
 #include "debug.h"
 #include "bus.h"
@@ -13,11 +14,11 @@
 #include <linux/leds.h>
 #include <linux/workqueue.h>
 
-/* Enable/disable chip-attached LEDs (default ON)
+/* Enable/disable chip-attached LEDs (default disabled)
  * Note: The softmac driver still exposes halow-traffic triggers to hook to LEDs attached to the
  * host (not the hardware) regardless of this modparam
  */
-static bool enable_hw_leds __read_mostly = true;
+static bool enable_hw_leds __read_mostly;
 module_param(enable_hw_leds, bool, 0644);
 MODULE_PARM_DESC(enable_hw_leds, "Enable HW-attached LEDs");
 
@@ -69,6 +70,30 @@ static const char *morse_led_get_tpt_led_name(struct morse *mors)
 	return mors->cfg->led_group.tpt_trigger_name;
 }
 
+static int morse_led_gpio_enable_output(struct morse *mors, int pin_num, bool enable)
+{
+	if (!mors->cfg->gpio_enable_output)
+		return -ENOTSUPP;
+
+	if (!morse_hw_is_on(mors))
+		return -ENODEV;
+
+	return mors->cfg->gpio_enable_output(mors, pin_num, enable);
+}
+
+static int morse_led_gpio_write_output(struct morse *mors, int pin_num, bool value)
+{
+	if (!mors->cfg->gpio_write_output)
+		return -ENOTSUPP;
+
+	if (!morse_hw_is_on(mors))
+		return -ENODEV;
+
+	mors->cfg->gpio_write_output(mors, pin_num, value);
+
+	return 0;
+}
+
 static void morse_led_callback(struct led_classdev *led_cdev, enum led_brightness brightness)
 {
 	struct morse_led *led = container_of(led_cdev, struct morse_led, led_cdev);
@@ -88,10 +113,10 @@ static void led_work_function(struct work_struct *work)
 		return;
 
 	mors = (struct morse *)dev_get_drvdata(dev);
-	if (!mors || !mors->cfg || !mors->cfg->gpio_write_output)
+	if (!mors || !mors->cfg)
 		return;
 
-	mors->cfg->gpio_write_output(mors, led->pin_num, led->active);
+	morse_led_gpio_write_output(mors, led->pin_num, led->active);
 }
 
 static int morse_led_feature_enabled(struct morse *mors)
@@ -169,7 +194,7 @@ static int morse_led_register(struct morse *mors, struct morse_led *led, int pin
 	if (mode == MORSE_LED_DISABLED)
 		return 0;
 
-	ret = (!mors->cfg->gpio_enable_output || mors->cfg->gpio_enable_output(mors, pin_num, 1));
+	ret = morse_led_gpio_enable_output(mors, pin_num, 1);
 	if (ret) {
 		MORSE_WARN(mors, "LED could not enable GPIO %d output\n", pin_num);
 		led->mode = MORSE_LED_DISABLED;
@@ -194,10 +219,8 @@ static int morse_led_register(struct morse *mors, struct morse_led *led, int pin
 	ret = led_classdev_register(mors->dev, &led->led_cdev);
 	if (ret) {
 		MORSE_WARN(mors, "Failed to register LED device on pin %d\n", pin_num);
-		if (mors->cfg->gpio_write_output)
-			mors->cfg->gpio_write_output(mors, led->pin_num, 0);
-		if (mors->cfg->gpio_enable_output)
-			mors->cfg->gpio_enable_output(mors, led->pin_num, 0);
+		morse_led_gpio_write_output(mors, led->pin_num, 0);
+		morse_led_gpio_enable_output(mors, led->pin_num, 0);
 		led->mode = MORSE_LED_DISABLED;
 	}
 
@@ -244,10 +267,8 @@ void morse_led_exit(struct morse *mors)
 
 		led_classdev_unregister(&led->led_cdev);
 		cancel_work_sync(&led->work);
-		if (mors->cfg->gpio_write_output)
-			mors->cfg->gpio_write_output(mors, led->pin_num, 0);
-		if (mors->cfg->gpio_enable_output)
-			mors->cfg->gpio_enable_output(mors, led->pin_num, 0);
+		morse_led_gpio_write_output(mors, led->pin_num, 0);
+		morse_led_gpio_enable_output(mors, led->pin_num, 0);
 		led->mode = MORSE_LED_DISABLED;
 	}
 }
@@ -268,8 +289,7 @@ void morse_led_restore_after_restart(struct morse *mors)
 		if (led->mode == MORSE_LED_DISABLED)
 			continue;
 
-		if (!mors->cfg->gpio_enable_output ||
-		    mors->cfg->gpio_enable_output(mors, led->pin_num, 1)) {
+		if (morse_led_gpio_enable_output(mors, led->pin_num, 1)) {
 			MORSE_WARN(mors, "LED could not re-enable GPIO %d output\n", led->pin_num);
 			led_classdev_unregister(&led->led_cdev);
 			cancel_work_sync(&led->work);
@@ -277,7 +297,6 @@ void morse_led_restore_after_restart(struct morse *mors)
 			continue;
 		}
 
-		if (mors->cfg->gpio_write_output)
-			mors->cfg->gpio_write_output(mors, led->pin_num, led->led_cdev.brightness);
+		morse_led_gpio_write_output(mors, led->pin_num, led->led_cdev.brightness);
 	}
 }

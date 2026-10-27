@@ -5,11 +5,12 @@
  */
 
 #include <linux/types.h>
+#include <linux/bitops.h>
 #include <linux/ieee80211.h>
 
 #include "dot11ah.h"
 #include "tim.h"
-#include "debug.h"
+#include "dot11ah_debug.h"
 #include "../morse.h"
 
 /* TODO: ADE for AIDs > 7 (not tested in WFA nor advertised in marketing material) */
@@ -441,8 +442,8 @@ static int morse_dot11_s1g_to_tim_parse_ade_mode(struct ieee80211_tim_ie *tim,
 	return length + 1;
 
 error:
-	dot11ah_err("ADE mode is not supported for AIDs larger than 7.\n");
-	return length;
+	dot11ah_warn_ratelimited("ADE mode is not supported for AIDs larger than 7.\n");
+	return length + 1;
 }
 
 /* 9.4.2.5.2 Block Bitmap Mode */
@@ -788,6 +789,59 @@ static void morse_dot11_tim_to_s1g_parse_ade_mode(struct tim_to_s1g_parse_state 
  * The output Non-S1G map is limited only to the first 8 AIDs.
  * Also, any incoming AID that is larger than 2008 is dropped.
  */
+int morse_dot11_s1g_tim_validate(const struct dot11ah_s1g_tim_ie *s1g_tim, size_t total_len)
+{
+	size_t block_info_len;
+	size_t index = 0;
+
+	if (!s1g_tim || total_len < offsetof(struct dot11ah_s1g_tim_ie, bitmap_control) ||
+	    total_len > sizeof(*s1g_tim))
+		return -EINVAL;
+
+	if (total_len <= offsetof(struct dot11ah_s1g_tim_ie, encoded_block_info))
+		return 0;
+
+	block_info_len = total_len - offsetof(struct dot11ah_s1g_tim_ie, encoded_block_info);
+
+	while (index < block_info_len) {
+		u8 block_ctrl = s1g_tim->encoded_block_info[index++];
+		u8 enc_mode = (block_ctrl & IEEE80211_S1G_TIM_BLOCK_CTL_ENC_MODE) >>
+			IEEE80211_S1G_TIM_BLOCK_CTL_ENC_MODE_SHIFT;
+		size_t remaining;
+		size_t encoded_len;
+
+		if (index >= block_info_len)
+			return -EINVAL;
+
+		remaining = block_info_len - index;
+
+		switch (enc_mode) {
+		case ENC_MODE_BLOCK:
+			encoded_len = 1 + hweight8(s1g_tim->encoded_block_info[index]);
+			break;
+		case ENC_MODE_AID:
+			encoded_len = 1;
+			break;
+		case ENC_MODE_OLB:
+			encoded_len = 1 + s1g_tim->encoded_block_info[index];
+			break;
+		case ENC_MODE_ADE:
+			encoded_len = 1 +
+				((s1g_tim->encoded_block_info[index] & 0xF8) >> 3);
+			break;
+		default:
+			return -EINVAL;
+		}
+
+		if (encoded_len > remaining)
+			return -EINVAL;
+
+		index += encoded_len;
+	}
+
+	return 0;
+}
+
 int morse_dot11_s1g_to_tim(struct ieee80211_tim_ie *tim, const struct dot11ah_s1g_tim_ie *s1g_tim,
 			   size_t total_len)
 {
@@ -805,8 +859,8 @@ int morse_dot11_s1g_to_tim(struct ieee80211_tim_ie *tim, const struct dot11ah_s1
 	if (!tim || !s1g_tim)
 		return length;
 
-	if (total_len < 2)
-		return length;
+	if (morse_dot11_s1g_tim_validate(s1g_tim, total_len))
+		return -EINVAL;
 
 	tim->dtim_count = s1g_tim->dtim_count;
 	tim->dtim_period = s1g_tim->dtim_period;

@@ -308,7 +308,6 @@ void morse_beacon_insert_ies(struct morse_vif *mors_vif,
 	}
 
 	morse_mbssid_insert_ie(mors_vif, mors, ies_mask);
-	spin_lock_bh(&mors_vif->vendor_ie.lock);
 	morse_vendor_ie_add_ies(mors_vif, ies_mask, MORSE_VENDOR_IE_TYPE_BEACON);
 
 	mesh = mors_vif->mesh;
@@ -326,8 +325,6 @@ void morse_beacon_insert_ies(struct morse_vif *mors_vif,
 		}
 		mesh_conf->mbca.beacon_count++;
 	}
-
-	spin_unlock_bh(&mors_vif->vendor_ie.lock);
 }
 
 /**

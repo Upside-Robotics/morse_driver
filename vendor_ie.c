@@ -94,19 +94,17 @@ static int morse_vendor_ie_clear_ie_list(struct morse_vif *mors_vif, u16 mgmt_ty
 	if (!mors_vif)
 		return 0;
 
-	spin_lock_bh(&mors_vif->vendor_ie.lock);
 	vie_config = mors_vif->vendor_ie.vie_config;
 	if (!vie_config)
-		goto exit;
+		return 0;
 
+	spin_lock_bh(&mors_vif->vendor_ie.lock);
 	list_for_each_entry_safe(vendor_ie, tmp, &vie_config->ie_list, list) {
 		if (vendor_ie->mgmt_type_mask & mgmt_type_mask) {
 			list_del(&vendor_ie->list);
 			kfree(vendor_ie);
 		}
 	}
-
-exit:
 	spin_unlock_bh(&mors_vif->vendor_ie.lock);
 	return 0;
 }
@@ -230,13 +228,11 @@ static int morse_vendor_ie_add_oui_to_filter(struct morse_vif *mors_vif, u16 mgm
 	if (!mors_vif)
 		return -ENODEV;
 
-	spin_lock_bh(&mors_vif->vendor_ie.lock);
 	vie_config = mors_vif->vendor_ie.vie_config;
-	if (!vie_config) {
-		ret = -ENXIO;
-		goto exit;
-	}
+	if (!vie_config)
+		return -ENXIO;
 
+	spin_lock_bh(&mors_vif->vendor_ie.lock);
 	item = oui_filter_find_oui(mors_vif, oui);
 	if (!item) {
 		if (vie_config->n_oui_filters >= MAX_NUM_OUI_FILTERS) {
@@ -300,14 +296,11 @@ static int morse_vendor_ie_clear_oui_filter(struct morse_vif *mors_vif, u16 mgmt
 	if (!mors_vif)
 		return -ENODEV;
 
-	spin_lock_bh(&mors_vif->vendor_ie.lock);
-
 	vie_config = mors_vif->vendor_ie.vie_config;
-	if (!vie_config) {
-		spin_unlock_bh(&mors_vif->vendor_ie.lock);
+	if (!vie_config)
 		return -ENXIO;
-	}
 
+	spin_lock_bh(&mors_vif->vendor_ie.lock);
 	empty = list_empty(&vie_config->oui_filter_list);
 
 	list_for_each_entry_safe(item, tmp, &vie_config->oui_filter_list, list)
@@ -381,6 +374,7 @@ u16 morse_vendor_ie_get_ies_length(struct morse_vif *mors_vif, u16 mgmt_type_mas
 	if (!vie_config)
 		return 0;
 
+	spin_lock_bh(&mors_vif->vendor_ie.lock);
 	list_for_each_entry(vendor_ie, &vie_config->ie_list, list) {
 		if (vendor_ie->mgmt_type_mask & mgmt_type_mask) {
 			struct ieee80211_vendor_ie *ie =
@@ -394,6 +388,7 @@ u16 morse_vendor_ie_get_ies_length(struct morse_vif *mors_vif, u16 mgmt_type_mas
 		}
 	}
 
+	spin_unlock_bh(&mors_vif->vendor_ie.lock);
 	return vendor_ie_length;
 }
 
@@ -403,6 +398,7 @@ int morse_vendor_ie_add_ies(struct morse_vif *mors_vif,
 	struct vendor_ie_list_item *item;
 	struct ie_element *element;
 	struct morse_vendor_ie *vie_config;
+	int ret = 0;
 
 	if (!mors_vif || !mgmt_type_mask || !ies_mask)
 		return 0;
@@ -411,6 +407,7 @@ int morse_vendor_ie_add_ies(struct morse_vif *mors_vif,
 	if (!vie_config)
 		return 0;
 
+	spin_lock_bh(&mors_vif->vendor_ie.lock);
 	list_for_each_entry(item, &vie_config->ie_list, list) {
 		if (item->mgmt_type_mask & mgmt_type_mask) {
 			struct ieee80211_vendor_ie *ie =
@@ -420,16 +417,18 @@ int morse_vendor_ie_add_ies(struct morse_vif *mors_vif,
 
 			element = morse_dot11_ies_create_ie_element(ies_mask,
 								    WLAN_EID_VENDOR_SPECIFIC,
-								    ie->len, false, false);
+								    ie->len, true, false);
 
-			if (!element)
-				return -EINVAL;
-
-			element->ptr = (u8 *)ie->oui;
+			if (!element) {
+				ret = -EINVAL;
+				break;
+			}
+			memcpy(element->ptr, (u8 *)ie->oui, ie->len);
 		}
 	}
 
-	return 0;
+	spin_unlock_bh(&mors_vif->vendor_ie.lock);
+	return ret;
 }
 
 void morse_vendor_ie_process_rx_mgmt(struct ieee80211_vif *vif, const struct sk_buff *skb)

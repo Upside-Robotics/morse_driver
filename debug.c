@@ -214,8 +214,8 @@ static void read_vendor_operations(struct seq_file *file, struct morse_ops *ops)
 	seq_puts(file, "    Features in operation\n");
 	seq_printf(file, "      [%c] DTIM CTS-To-Self\n",
 		   MORSE_OPS_IN_USE(ops, DTIM_CTS_TO_SELF) ? '*' : ' ');
-	seq_printf(file, "      [%c] Legacy AMSDU\n",
-		   MORSE_OPS_IN_USE(ops, LEGACY_AMSDU) ? '*' : ' ');
+	seq_printf(file, "      [%c] A-MSDU 1500-byte limit\n",
+		   MORSE_OPS_IN_USE(ops, AMSDU_1500_BYTE_LIMIT) ? '*' : ' ');
 }
 
 static void read_sta_vendor_info_iter(void *data, struct ieee80211_sta *sta)
@@ -238,26 +238,28 @@ static void read_sta_vendor_info_iter(void *data, struct ieee80211_sta *sta)
 	seq_printf(file, "      MMSS offset: %u\n", mors_sta->vendor_info.morse_mmss_offset);
 	seq_printf(file, "      [%c] Supports short ack timeout\n",
 		   mors_sta->vendor_info.supports_short_ack_timeout ? '*' : ' ');
+	seq_printf(file, "      [%c] Supports A-MSDU 1500-byte-limiting\n",
+		   mors_sta->vendor_info.supports_amsdu_1500_byte_limiting ? '*' : ' ');
 	read_vendor_operations(file, &mors_sta->vendor_info.operations);
 }
 
 static void read_sta_bss_vendor_info(struct seq_file *file, struct morse_vif *mors_vif)
 {
 	seq_printf(file, "    SW version: %d.%d.%d\n",
-			mors_vif->bss_vendor_info.sw_ver.major,
-			mors_vif->bss_vendor_info.sw_ver.minor,
-			mors_vif->bss_vendor_info.sw_ver.patch);
-	seq_printf(file, "    HW version: 0x%08x\n",
-			mors_vif->bss_vendor_info.chip_id);
+		   mors_vif->bss_vendor_info.sw_ver.major,
+		   mors_vif->bss_vendor_info.sw_ver.minor,
+		   mors_vif->bss_vendor_info.sw_ver.patch);
+	seq_printf(file, "    HW version: 0x%08x\n", mors_vif->bss_vendor_info.chip_id);
 	seq_printf(file, "    Rate control: %s\n",
-			rc_method_to_string(mors_vif->bss_vendor_info.rc_method));
+		   rc_method_to_string(mors_vif->bss_vendor_info.rc_method));
 	seq_puts(file, "    Capabilities\n");
 	seq_printf(file, "      MMSS: %u\n", mors_vif->bss_ampdu_mmss);
 	seq_printf(file, "      MMSS offset: %u\n",
-			mors_vif->bss_vendor_info.morse_mmss_offset);
+		   mors_vif->bss_vendor_info.morse_mmss_offset);
 	seq_printf(file, "      [%c] Supports short ack timeout\n",
-			mors_vif->bss_vendor_info.supports_short_ack_timeout ?
-								'*' : ' ');
+		   mors_vif->bss_vendor_info.supports_short_ack_timeout ? '*' : ' ');
+	seq_printf(file, "      [%c] Supports A-MSDU 1500-byte-limiting\n",
+		   mors_vif->bss_vendor_info.supports_amsdu_1500_byte_limiting ? '*' : ' ');
 	read_vendor_operations(file, &mors_vif->bss_vendor_info.operations);
 }
 
@@ -287,7 +289,8 @@ static int read_softmac_vendor_info_tbl(struct seq_file *file, void *data)
 			   mors_vif->capabilities.morse_mmss_offset);
 		/* Is unconditionally set */
 		seq_puts(file, "      [*] Supports short ack timeout\n");
-
+		seq_printf(file, "      [%c] Supports A-MSDU 1500-byte-limiting\n",
+			   mors_vif->capabilities.amsdu_1500_byte_limiting ? '*' : ' ');
 		read_vendor_operations(file, &mors_vif->operations);
 
 		if (morse_mac_is_iface_ap_type(vif)) {
@@ -326,6 +329,8 @@ static int read_fullmac_vendor_info_tbl(struct seq_file *file, void *data)
 				mors_vif->capabilities.morse_mmss_offset);
 		/* Is unconditionally set */
 		seq_puts(file, "      [*] Supports short ack timeout\n");
+		seq_printf(file, "      [%c] Supports A-MSDU 1500-byte-limiting\n",
+			   mors_vif->capabilities.amsdu_1500_byte_limiting ? '*' : ' ');
 
 		read_vendor_operations(file, &mors_vif->operations);
 
@@ -414,6 +419,15 @@ static int read_restart_count(struct seq_file *file, void *data)
 	return 0;
 }
 
+static int read_file_yaps_benchmark(struct seq_file *file, void *data)
+{
+	struct morse *mors = dev_get_drvdata(file->private);
+
+	morse_yaps_benchmark(mors, file);
+
+	return 0;
+}
+
 #ifdef CONFIG_MORSE_DEBUGFS
 static int read_file_pagesets(struct seq_file *file, void *data)
 {
@@ -436,17 +450,6 @@ static int read_file_yaps(struct seq_file *file, void *data)
 
 	return 0;
 }
-
-#ifdef MORSE_YAPS_SUPPORTS_BENCHMARK
-static int read_file_yaps_benchmark(struct seq_file *file, void *data)
-{
-	struct morse *mors = dev_get_drvdata(file->private);
-
-	morse_yaps_benchmark(mors, file);
-
-	return 0;
-}
-#endif
 
 static int read_skbq_mon_tbl(struct seq_file *file, void *data)
 {
@@ -574,7 +577,9 @@ static int read_tx_status_info(struct seq_file *file, void *data)
 	int i, count = min_t(int, MORSE_SKB_MAX_RATES, IEEE80211_TX_MAX_RATES);
 
 	while (kfifo_get(&mors->debug.tx_status_entries, &entry)) {
-		seq_printf(file, "%d,%u,%u", entry.tid, entry.flags, le16_to_cpu(entry.ampdu_info));
+		seq_printf(file, "%d,%u,%u,%u", entry.tid, entry.flags,
+			   le16_to_cpu(entry.was_amdpu),
+			   le16_to_cpu(entry.per_attempt_missing_block_ack));
 		for (i = 0; i < count; i++) {
 			enum dot11_bandwidth bw_idx;
 			u8 mcs_index;
@@ -1074,9 +1079,10 @@ static int get_tx_sta_summary_tbl(struct seq_file *file, void *data)
 	return ret;
 }
 
-int morse_init_debug(struct morse *mors)
+int morse_init_debug(struct morse *mors, struct dentry *entry)
 {
-	mors->debug.debugfs_phy = debugfs_create_dir("morse", mors->wiphy->debugfsdir);
+	mors->debug.debugfs_phy = debugfs_create_dir("morse", entry);
+
 	if (!mors->debug.debugfs_phy)
 		return -ENOMEM;
 
@@ -1111,6 +1117,11 @@ int morse_init_debug(struct morse *mors)
 	debugfs_create_devm_seqfile(mors->dev, "restarts",
 				    mors->debug.debugfs_phy, read_restart_count);
 
+	if (mors->chip_if->active_chip_if == MORSE_CHIP_IF_YAPS) {
+		debugfs_create_devm_seqfile(mors->dev, "yaps_benchmark",
+					    mors->debug.debugfs_phy, read_file_yaps_benchmark);
+	}
+
 #ifdef CONFIG_MORSE_DEBUGFS
 	if (mors->chip_if->active_chip_if == MORSE_CHIP_IF_PAGESET)
 		debugfs_create_devm_seqfile(mors->dev, "pagesets",
@@ -1118,10 +1129,6 @@ int morse_init_debug(struct morse *mors)
 	else if (mors->chip_if->active_chip_if == MORSE_CHIP_IF_YAPS) {
 		debugfs_create_devm_seqfile(mors->dev, "yaps",
 					    mors->debug.debugfs_phy, read_file_yaps);
-#ifdef MORSE_YAPS_SUPPORTS_BENCHMARK
-		debugfs_create_devm_seqfile(mors->dev, "yaps_benchmark",
-					    mors->debug.debugfs_phy, read_file_yaps_benchmark);
-#endif
 	}
 
 	debugfs_create_devm_seqfile(mors->dev, "skbq_mon",

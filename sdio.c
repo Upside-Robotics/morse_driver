@@ -76,6 +76,8 @@ MODULE_PARM_DESC(sdio_clk_debugfs,
 #define MORSE_SDIO_INFO(_m, _f, _a...)		morse_info(FEATURE_ID_SDIO, _m, _f, ##_a)
 #define MORSE_SDIO_WARN(_m, _f, _a...)		morse_warn(FEATURE_ID_SDIO, _m, _f, ##_a)
 #define MORSE_SDIO_ERR(_m, _f, _a...)		morse_err(FEATURE_ID_SDIO, _m, _f, ##_a)
+#define MORSE_SDIO_ERR_RATELIMITED(_m, _f, _a...) \
+	morse_err_ratelimited(FEATURE_ID_SDIO, _m, _f, ##_a)
 
 struct morse_sdio {
 	bool enabled;
@@ -118,9 +120,10 @@ static void sdio_log_err(struct morse_sdio *sdio, const char *operation, unsigne
 		       sdio->register_addr_base,
 		       sdio->bulk_addr_base,
 		       ret);
-	MORSE_SDIO_ERR(mors, "sdio: %s fn=%d 0x%08x:%d r=0x%08x b=0x%08x (ret:%d)",
-		       operation, fn, address, len, sdio->register_addr_base,
-		       sdio->bulk_addr_base, ret);
+	MORSE_SDIO_ERR_RATELIMITED(mors,
+		"sdio: %s fn=%d 0x%08x:%d r=0x%08x b=0x%08x (ret:%d)",
+		operation, fn, address, len, sdio->register_addr_base,
+		sdio->bulk_addr_base, ret);
 }
 
 static void irq_handler(struct sdio_func *func1)
@@ -363,6 +366,7 @@ static int morse_sdio_regl_read(struct morse_sdio *sdio, u32 address, u32 *value
 	ssize_t ret = 0;
 	struct morse *mors = sdio->func ? sdio_get_drvdata(sdio->func) : NULL;
 	struct sdio_func *func_to_use;
+	u32 tmp;
 
 	if (!mors) {
 		ret = -EINVAL;
@@ -377,12 +381,14 @@ static int morse_sdio_regl_read(struct morse_sdio *sdio, u32 address, u32 *value
 
 	trace_bus_reg_read(func_to_use->num, address, 4);
 	address &= 0x0000FFFF;	/* remove base and keep offset */
-	*value = sdio_readl(func_to_use,  (__force u32)cpu_to_le32(address), (int *)&ret);
+	tmp = sdio_readl(func_to_use,  (__force u32)cpu_to_le32(address), (int *)&ret);
 	/* return read size */
-	if (ret)
+	if (ret) {
 		sdio_log_err(sdio, "readl", func_to_use->num, address, sizeof(u32), ret);
-	else
+	} else {
+		*value = tmp;
 		ret = sizeof(*value);
+	}
 exit:
 	return (int)ret;
 }
@@ -697,10 +703,8 @@ static int morse_sdio_reset(int reset_pin, struct sdio_func *func)
 	/* Let runtime PM know the card is powered off */
 	pm_runtime_put(&card->dev);
 
-	if (reset_pin >= 0) {
+	if (reset_pin >= 0)
 		morse_hw_reset(reset_pin);
-		mdelay(20);
-	}
 
 	sdio_claim_host(func);
 	sdio_disable_func(func);
@@ -784,8 +788,11 @@ static void morse_sdio_release(struct morse_sdio *sdio)
 }
 
 static const struct of_device_id morse_of_match_table[] = {
-	{.compatible = "morse,mm6104", },	/* DEPRECATED */
+	{.compatible = "morse,mm6104", },
 	{.compatible = "morse,mm610x", },
+	{.compatible = "morsemicro,mm6104", },
+	{.compatible = "morsemicro,mm6108", },
+	{.compatible = "morsemicro,mm8108", },
 	{ },
 };
 
@@ -905,7 +912,7 @@ static int morse_sdio_probe(struct sdio_func *func, const struct sdio_device_id 
 	}
 
 	mutex_lock(&mors->lock);
-	ret = morse_firmware_prepare(mors, reset_hw, morse_hw_should_reattach());
+		ret = morse_firmware_prepare(mors, reset_hw, morse_hw_should_reattach());
 	if (!ret || ret == -EALREADY)
 		morse_hw_set_state(mors, MORSE_HW_STATE_ON);
 	mutex_unlock(&mors->lock);
@@ -960,15 +967,15 @@ static int morse_sdio_probe(struct sdio_func *func, const struct sdio_device_id 
 	irq_enabled = true;
 
 	if (!morse_test_mode_enabled(test_mode)) {
-		ret = morse_mac_health_check_init(mors);
+		ret = morse_watchdog_init(mors);
 		if (ret) {
-			MORSE_SDIO_ERR(mors, "morse_mac_health_check_init failed %d\n", ret);
+			MORSE_SDIO_ERR(mors, "morse_watchdog_health_check_init failed %d\n", ret);
 			goto err_exit;
 		}
 		health_check_init_done = true;
 
 		if (attach) {
-			u32 attach_cfg = morse_mac_get_attach_config();
+			u32 attach_cfg = morse_hw_get_attach_config();
 
 			ret = morse_hw_attach(mors, attach_cfg);
 			if (ret) {
@@ -1040,7 +1047,7 @@ err_exit:
 	}
 #endif
 	if (health_check_init_done)
-		morse_mac_health_check_finish(mors);
+		morse_watchdog_health_check_finish(mors);
 	if (mac_registered)
 		morse_mac_unregister(mors);
 	if (irq_enabled)
@@ -1097,7 +1104,7 @@ static void morse_sdio_remove(struct sdio_func *func)
 #endif
 
 		if (!morse_test_mode_enabled(test_mode)) {
-			morse_mac_health_check_finish(mors);
+			morse_watchdog_health_check_finish(mors);
 			morse_mac_unregister(mors);
 			morse_sdio_disable_irq(sdio);
 			mors->cfg->ops->finish(mors);

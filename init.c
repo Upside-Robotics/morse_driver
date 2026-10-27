@@ -9,6 +9,7 @@
 #include <linux/stringify.h>
 #include "debug.h"
 #include "morse.h"
+#include "dot11ah/dot11ah.h"
 
 uint test_mode;
 #ifdef CONFIG_MORSE_ENABLE_TEST_MODES
@@ -59,6 +60,13 @@ static int __init morse_init(void)
 	else
 		morse_init_log_levels(MORSE_MSG_NONE);
 
+	/* Initialise the dot11ah subsystem */
+	ret = morse_dot11ah_init();
+	if (ret) {
+		pr_err("morse_dot11ah_init() failed: %d\n", ret);
+		return ret;
+	}
+
 #ifdef CONFIG_MORSE_SDIO
 	ret = morse_sdio_init();
 	if (ret)
@@ -92,6 +100,9 @@ static void __exit morse_exit(void)
 #ifdef CONFIG_MORSE_USB
 	morse_usb_exit();
 #endif
+
+	/* Tear down the S1G (dot11ah) subsystem */
+	morse_dot11ah_exit();
 }
 
 module_init(morse_init);

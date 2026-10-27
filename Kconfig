@@ -1,5 +1,6 @@
 config WLAN_VENDOR_MORSE
 	tristate "Morse Micro driver"
+	select WANT_DEV_COREDUMP
 	help
 	  If you have a wireless card belonging to this class, say Y.
 
@@ -109,7 +110,7 @@ config MORSE_CHANNELIZATION_SCHEME
 	  Choose 1 for IEEE 802.11-2020 channelization,
 	  2 for IEEE 802.11-2024 channelization, or
 	  3 for IEEE 802.11mf channelization.
-	  Use channelization_scheme={1,2,3} modparam when loading the dot11ah module to override this default.
+	  Use channelization_scheme={1,2,3} modparam when loading the morse module to override this default.
 
 config MORSE_DHCP_OFFLOAD
 	bool "Offload DHCP lease renewal processing to the firmware"
@@ -190,6 +191,7 @@ config MORSE_ENABLE_WIPHY
 	  FullMAC mode is selected by the enable_wiphy modparam.
 	  Say Y here to use FullMAC mode by default when the enable_wiphy modparam is absent.
 	  Otherwise SoftMAC mode is used by default.
+
 
 config MORSE_REATTACH_HW
 	bool "Enable HW reattach mode by default"

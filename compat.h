@@ -107,10 +107,14 @@ static inline u32 morse_random_u32_max(u32 max)
 
 #if KERNEL_VERSION(7, 0, 0) <= MAC80211_VERSION_CODE
 #define MORSE_ADDBA_ACTION_CODE(_mgmt) ((_mgmt)->u.action.action_code)
+#define MORSE_ADDBA_REQ_CAPAB(_mgmt) ((_mgmt)->u.action.addba_req.capab)
+#define MORSE_ADDBA_RESP_CAPAB(_mgmt) ((_mgmt)->u.action.addba_resp.capab)
 #define MORSE_IEEE80211_MIN_ACTION_SIZE_CATEGORY IEEE80211_MIN_ACTION_SIZE(category)
 #define MORSE_IEEE80211_MIN_ACTION_SIZE_ACTION_CODE IEEE80211_MIN_ACTION_SIZE(action_code)
 #else
 #define MORSE_ADDBA_ACTION_CODE(_mgmt) ((_mgmt)->u.action.u.addba_req.action_code)
+#define MORSE_ADDBA_REQ_CAPAB(_mgmt) ((_mgmt)->u.action.u.addba_req.capab)
+#define MORSE_ADDBA_RESP_CAPAB(_mgmt) ((_mgmt)->u.action.u.addba_resp.capab)
 #define MORSE_IEEE80211_MIN_ACTION_SIZE_CATEGORY IEEE80211_MIN_ACTION_SIZE
 #define MORSE_IEEE80211_MIN_ACTION_SIZE_ACTION_CODE (IEEE80211_MIN_ACTION_SIZE + 1)
 #endif
@@ -142,3 +146,55 @@ typedef struct bin_attribute morse_bin_attr_t;
 #if KERNEL_VERSION(5, 3, 0) > MAC80211_VERSION_CODE
 #define SAE_PASSWORD_MAX_LEN 128
 #endif
+
+/**
+ * morse_wiphy_radio_init - describe this device's single physical radio to the wiphy
+ *
+ * On more recent kernels, some features are only enabled once wiphy->n_radio is set.
+ * Setup radio and n_radio in order to have support for more such features introduced
+ * by the kernel in the future
+ *
+ * @wiphy: wiphy to configure
+ * @comb: interface combination already built for wiphy->iface_combinations,
+ *	reused here since there is only one radio
+ *
+ * @returns: true on success, false if the radio descriptor could not be allocated
+ */
+static inline bool morse_wiphy_radio_init(struct wiphy *wiphy,
+					   struct ieee80211_iface_combination *comb)
+{
+#if KERNEL_VERSION(6, 17, 0) <= MAC80211_VERSION_CODE
+	static const struct wiphy_radio_freq_range mors_radio_freq_range[] = {
+		{
+			.start_freq = MHZ_TO_KHZ(5170),
+			.end_freq = MHZ_TO_KHZ(5895),
+		},
+	};
+	struct wiphy_radio *radio = kcalloc(1, sizeof(*radio), GFP_KERNEL);
+
+	if (!radio)
+		return false;
+
+	radio->freq_range = mors_radio_freq_range;
+	radio->n_freq_range = ARRAY_SIZE(mors_radio_freq_range);
+	radio->iface_combinations = comb;
+	radio->n_iface_combinations = 1;
+	wiphy->radio = radio;
+	wiphy->n_radio = 1;
+#endif
+	return true;
+}
+
+/**
+ * morse_wiphy_radio_deinit - free the radio descriptor set up by morse_wiphy_radio_init()
+ *
+ * @wiphy: wiphy to clean up
+ */
+static inline void morse_wiphy_radio_deinit(struct wiphy *wiphy)
+{
+#if KERNEL_VERSION(6, 17, 0) <= MAC80211_VERSION_CODE
+	kfree(wiphy->radio);
+	wiphy->radio = NULL;
+	wiphy->n_radio = 0;
+#endif
+}

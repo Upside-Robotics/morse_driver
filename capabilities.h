@@ -107,6 +107,7 @@ struct morse_caps {
 	u8 number_sounding_dimensions;
 	u8 maximum_ampdu_length_exponent;
 	u8 morse_mmss_offset;
+	u8 amsdu_1500_byte_limiting;
 };
 
 /* Shorten the verbosity for referencing the firmware flags */
