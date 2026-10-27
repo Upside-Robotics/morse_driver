@@ -1,0 +1,7 @@
+ARG FEDORA_BOOTC=quay.io/fedora/fedora-bootc:44@sha256:fa1bdfabdc0d920f230a70ce40d3cf6d116975e2dd487e1c116a560a9b78771c
+FROM ${FEDORA_BOOTC} AS builder
+COPY . /build/morse_driver/
+RUN bash /build/morse_driver/bootc/build-fedora.sh /out
+
+FROM scratch AS artifacts
+COPY --from=builder /out/ /

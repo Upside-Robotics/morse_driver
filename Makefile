@@ -19,7 +19,9 @@ ifeq ($(USING_CLANG), 0)
 ccflags-y += -Wno-stringop-truncation -Wmaybe-uninitialized -Wno-missing-attributes
 endif
 ccflags-y += "-DMORSE_VERSION=$(MORSE_VERSION)"
+ifneq ($(strip $(KERNEL_SRC)),)
 ccflags-y += -I$(KERNEL_SRC)
+endif
 ccflags-$(CONFIG_MORSE_SDIO) += "-DCONFIG_MORSE_SDIO"
 ccflags-$(CONFIG_MORSE_SPI) += "-DCONFIG_MORSE_SPI"
 ccflags-$(CONFIG_MORSE_USB) += "-DCONFIG_MORSE_USB"
