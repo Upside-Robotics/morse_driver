@@ -1,0 +1,6 @@
+diff --git a/argtable3/argtable3.c b/argtable3/argtable3.c
+--- a/argtable3/argtable3.c
++++ b/argtable3/argtable3.c
+@@ -1846,1 +1846,1 @@
+-	char *oli;				/* option letter list index */
++	const char *oli;				/* option letter list index */

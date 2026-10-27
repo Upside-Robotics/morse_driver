@@ -1,0 +1,6 @@
+diff --git a/src/ap/ap_config.c b/src/ap/ap_config.c
+--- a/src/ap/ap_config.c
++++ b/src/ap/ap_config.c
+@@ -848 +848 @@
+-#if defined(CONFIG_WPS) || defined(CONFIG_HS20)
++#ifdef CONFIG_WPS

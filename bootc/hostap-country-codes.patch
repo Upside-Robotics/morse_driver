@@ -1,0 +1,102 @@
+diff --git a/src/utils/morse.c b/src/utils/morse.c
+--- a/src/utils/morse.c
++++ b/src/utils/morse.c
+@@ -540 +540 @@
+-	.cc_list = {"US", "CA", "BR", "MX"},
++	.cc_list = {{'U', 'S'}, {'C', 'A'}, {'B', 'R'}, {'M', 'X'}},
+@@ -577 +577 @@
+-	.cc_list = {"US", "CA", "BR", "MX"},
++	.cc_list = {{'U', 'S'}, {'C', 'A'}, {'B', 'R'}, {'M', 'X'}},
+@@ -601 +601 @@
+-	.cc_list = {"US", "CA", "BR", "MX"},
++	.cc_list = {{'U', 'S'}, {'C', 'A'}, {'B', 'R'}, {'M', 'X'}},
+@@ -618 +618 @@
+-	.cc_list = {"US", "CA", "BR", "MX"},
++	.cc_list = {{'U', 'S'}, {'C', 'A'}, {'B', 'R'}, {'M', 'X'}},
+@@ -632 +632 @@
+-	.cc_list = {"EU", "GB"},
++	.cc_list = {{'E', 'U'}, {'G', 'B'}},
+@@ -648 +648 @@
+-	.cc_list = {"JP"},
++	.cc_list = {{'J', 'P'}},
+@@ -665 +665 @@
+-	.cc_list = {"JP"},
++	.cc_list = {{'J', 'P'}},
+@@ -678 +678 @@
+-	.cc_list = {"JP"},
++	.cc_list = {{'J', 'P'}},
+@@ -691 +691 @@
+-	.cc_list = {"JP"},
++	.cc_list = {{'J', 'P'}},
+@@ -701 +701 @@
+-	.cc_list = {"JP"},
++	.cc_list = {{'J', 'P'}},
+@@ -711 +711 @@
+-	.cc_list = {"KR"},
++	.cc_list = {{'K', 'R'}},
+@@ -732 +732 @@
+-	.cc_list = {"KR"},
++	.cc_list = {{'K', 'R'}},
+@@ -748 +748 @@
+-	.cc_list = {"KR"},
++	.cc_list = {{'K', 'R'}},
+@@ -760 +760 @@
+-	.cc_list = {"SG"},
++	.cc_list = {{'S', 'G'}},
+@@ -779 +779 @@
+-	.cc_list = {"SG"},
++	.cc_list = {{'S', 'G'}},
+@@ -794 +794 @@
+-	.cc_list = {"SG"},
++	.cc_list = {{'S', 'G'}},
+@@ -807 +807 @@
+-	.cc_list = {"AU"},
++	.cc_list = {{'A', 'U'}},
+@@ -831 +831 @@
+-	.cc_list = {"AU"},
++	.cc_list = {{'A', 'U'}},
+@@ -848 +848 @@
+-	.cc_list = {"AU"},
++	.cc_list = {{'A', 'U'}},
+@@ -862 +862 @@
+-	.cc_list = {"AU"},
++	.cc_list = {{'A', 'U'}},
+@@ -874 +874 @@
+-	.cc_list = {"AU", "AR", "CL", "CO"},
++	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}},
+@@ -897 +897 @@
+-	.cc_list = {"AU", "AR", "CL", "CO"},
++	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}},
+@@ -915 +915 @@
+-	.cc_list = {"AU", "AR", "CL", "CO"},
++	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}},
+@@ -930 +930 @@
+-	.cc_list = {"AU", "AR", "CL", "CO"},
++	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}},
+@@ -944 +944 @@
+-	.cc_list = {"AU", "AR", "CL", "CO"},
++	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}},
+@@ -958 +958 @@
+-	.cc_list = {"AU", "AR", "CL", "CO"},
++	.cc_list = {{'A', 'U'}, {'A', 'R'}, {'C', 'L'}, {'C', 'O'}},
+@@ -970 +970 @@
+-	.cc_list = {"NZ"},
++	.cc_list = {{'N', 'Z'}},
+@@ -995 +995 @@
+-	.cc_list = {"NZ"},
++	.cc_list = {{'N', 'Z'}},
+@@ -1012 +1012 @@
+-	.cc_list = {"NZ"},
++	.cc_list = {{'N', 'Z'}},
+@@ -1026 +1026 @@
+-	.cc_list = {"NZ"},
++	.cc_list = {{'N', 'Z'}},
+@@ -1038 +1038 @@
+-	.cc_list = {"ZZ"}, /* Setting to ZZ till operating class 77 is supported */
++	.cc_list = {{'Z', 'Z'}}, /* Setting to ZZ till operating class 77 is supported */
+@@ -1052 +1052 @@
+-	.cc_list = {"SG"},
++	.cc_list = {{'S', 'G'}},
+@@ -1064 +1064 @@
+-	.cc_list = {"IN"},
++	.cc_list = {{'I', 'N'}},
