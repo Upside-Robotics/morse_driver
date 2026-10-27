@@ -20,7 +20,7 @@ for kernel in "${kernels[@]}"; do
 done
 
 dnf --disable-repo=fedora-cisco-openh264 -y --setopt=install_weak_deps=False install \
-    gcc make git patch diffutils findutils kmod elfutils-libelf-devel \
+    gcc make git patch diffutils findutils kmod which elfutils-libelf-devel \
     openssl-devel libnl3-devel libusb1-devel dbus-devel libpcap-devel \
     sqlite-devel pkgconf-pkg-config "${headers[@]}"
 
